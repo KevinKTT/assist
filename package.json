@@ -1,0 +1,12 @@
+{
+  "name": "assist",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "uv run --directory backend uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "dev:web": "npm run dev --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}
