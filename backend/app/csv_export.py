@@ -22,6 +22,7 @@ def render_csv(report: dict) -> bytes:
     writer.writerow(["Hours pay", f"{report['hours_pay']:.2f}"])
     writer.writerow(["Miles", f"{report['miles']:.2f}"])
     writer.writerow(["Mileage pay", f"{report['mileage_pay']:.2f}"])
+    writer.writerow(["Expenses", f"{report['expenses']:.2f}"])
     writer.writerow(["Combined", f"{report['combined']:.2f}"])
     writer.writerow(["Tasks completed", report["tasks_done"]])
     writer.writerow(["Tasks open", report["tasks_open"]])
@@ -47,6 +48,15 @@ def render_csv(report: dict) -> bytes:
             f"{entry['miles']:.2f}",
             f"{entry['rate']:.4f}".rstrip("0").rstrip("."),
             f"{entry['pay']:.2f}",
+            csv_safe(entry["note"]),
+        ])
+    writer.writerow([])
+    writer.writerow(["Expenses"])
+    writer.writerow(["Date", "Amount", "Note"])
+    for entry in report["expense_entries"]:
+        writer.writerow([
+            entry["date"],
+            f"{entry['amount']:.2f}",
             csv_safe(entry["note"]),
         ])
     writer.writerow([])

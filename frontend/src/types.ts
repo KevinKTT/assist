@@ -11,7 +11,7 @@ export type Settings = {
 
 export type Payout = {
   id: number
-  kind: 'hours' | 'mileage'
+  kind: 'hours' | 'mileage' | 'expenses'
   period_start: string
   period_end: string
   amount: number
@@ -40,6 +40,13 @@ export type MileageEntry = {
   note: string
 }
 
+export type ExpenseEntry = {
+  id: number
+  date: string
+  amount: number
+  note: string
+}
+
 export type PeriodDay = {
   date: string
   hours: number
@@ -61,12 +68,14 @@ export type PeriodDetail = {
   hours_pay: number
   miles: number
   mileage_pay: number
+  expenses: number
   combined: number
   mixed_hour_rates: boolean
   mixed_mile_rates: boolean
   payday: string | null
   hours_payout: Payout | null
   mileage_payout: Payout | null
+  expenses_payout: Payout | null
   recorded_only: boolean
   days: PeriodDay[]
 }
@@ -103,10 +112,12 @@ export type Dashboard = {
     hours_pay: number
     miles: number
     mileage_pay: number
+    expenses: number
     combined: number
     days_worked: number
     hours_payout: Payout | null
     mileage_payout: Payout | null
+    expenses_payout: Payout | null
     payday: string | null
   }
   week: {
@@ -129,9 +140,11 @@ export type Dashboard = {
     hours_pay: number
     miles: number
     mileage_pay: number
+    expenses: number
     combined: number
     tasks_done: number
     tasks_open: number
+    expense_entries: ExpenseEntry[]
     series: SeriesPoint[]
   }
 }

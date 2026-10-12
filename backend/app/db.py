@@ -103,10 +103,37 @@ class Database:
               created_at TEXT NOT NULL,
               UNIQUE (kind, period_start, period_end)
             );
+            CREATE TABLE IF NOT EXISTS expense_entries (
+              id INTEGER PRIMARY KEY,
+              expense_date TEXT NOT NULL,
+              amount REAL NOT NULL,
+              note TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_time_date ON time_entries(work_date);
             CREATE INDEX IF NOT EXISTS idx_miles_date ON mileage_entries(drive_date);
+            CREATE INDEX IF NOT EXISTS idx_expenses_date ON expense_entries(expense_date);
             CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(task_date);
             CREATE INDEX IF NOT EXISTS idx_payouts_paid ON payouts(paid_on);
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO payouts (kind, period_start, period_end, amount, paid_on, note, created_at)
+            SELECT 'expenses', h.period_start, h.period_end, 0, h.paid_on, '', h.created_at
+            FROM payouts h
+            INNER JOIN payouts m
+              ON m.kind = 'mileage'
+             AND m.period_start = h.period_start
+             AND m.period_end = h.period_end
+            WHERE h.kind = 'hours'
+              AND NOT EXISTS (
+                SELECT 1 FROM payouts e
+                WHERE e.kind = 'expenses'
+                  AND e.period_start = h.period_start
+                  AND e.period_end = h.period_end
+              )
             """
         )
         self.conn.commit()

@@ -229,10 +229,16 @@ h2 { font-family: var(--display); font-weight: 600; }
   gap: 10px;
 }
 .timer-start {
-  color: var(--muted);
+  display: block;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: var(--rose-deep);
   font-size: 13px;
   font-weight: 800;
 }
+.timer-done { display: block; margin: 4px auto 0; }
 .timer-time {
   font-family: var(--display);
   font-size: 22px;
@@ -304,6 +310,12 @@ h2 { font-family: var(--display); font-weight: 600; }
   min-width: 0;
 }
 .entry-pay { margin-left: auto; font-weight: 800; color: var(--rose-deep); }
+.expenses .entry {
+  background: white;
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
 .today-entry { padding-left: 0; }
 
 .tabbar {
