@@ -172,8 +172,8 @@ def render_pdf(report: dict) -> bytes:
         box_w,
         box_h,
         WHITE,
-        "Tasks done",
-        str(report["tasks_done"]),
+        "Expenses",
+        money(report["expenses"]),
         INK,
         MUTED,
     )
@@ -214,6 +214,16 @@ def render_pdf(report: dict) -> bytes:
             entry(pdf, long_day(item["date"]), money(item["pay"]), "  ·  ".join(bits))
         total_bar(pdf, "Mileage pay", money(report["mileage_pay"]))
 
+    section(pdf, "Expenses")
+    if not report["expense_entries"]:
+        pdf.set_font("Nunito", "I", 10)
+        pdf.set_text_color(*MUTED)
+        pdf.cell(0, 6, "No expenses in this range", new_x="LMARGIN", new_y="NEXT")
+    else:
+        for item in report["expense_entries"]:
+            entry(pdf, long_day(item["date"]), money(item["amount"]), item["note"])
+        total_bar(pdf, "Expenses", money(report["expenses"]))
+
     section(pdf, "Tasks completed")
     done = [task for task in report["tasks"] if task["done"]]
     open_tasks = [task for task in report["tasks"] if not task["done"]]
@@ -237,7 +247,7 @@ def render_pdf(report: dict) -> bytes:
         pdf.cell(0, 6, "Nothing marked paid in this range", new_x="LMARGIN", new_y="NEXT")
     else:
         for payout in report["payouts"]:
-            kind = "Hours" if payout["kind"] == "hours" else "Miles"
+            kind = {"hours": "Hours", "mileage": "Miles", "expenses": "Expenses"}.get(payout["kind"], payout["kind"])
             detail = f"{kind}  ·  {long_day(payout['period_start'])} – {long_day(payout['period_end'])}"
             if payout["note"]:
                 detail += f"  ·  {payout['note']}"

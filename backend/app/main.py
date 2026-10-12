@@ -12,7 +12,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from app.csv_export import render_csv
 from app.db import ensure_settings, get_db, load_settings, now_iso, parse_day, parse_dt
-from app.money import hours_from_minutes, hours_from_seconds, line_pay, nearest_minutes, q2, q4, sum_pay
+from app.money import hours_from_minutes, hours_from_seconds, line_pay, nearest_minutes, q2, q4, sum_amounts, sum_pay
 from app.pdf_export import render_pdf
 from app.periods import (
     CYCLES,
@@ -86,6 +86,18 @@ class MileageIn(BaseModel):
 class MileagePatch(BaseModel):
     drive_date: str | None = None
     miles: float | None = None
+    note: str | None = None
+
+
+class ExpenseIn(BaseModel):
+    expense_date: str
+    amount: float
+    note: str
+
+
+class ExpensePatch(BaseModel):
+    expense_date: str | None = None
+    amount: float | None = None
     note: str | None = None
 
 
@@ -173,6 +185,22 @@ def check_miles(value: float) -> float:
     return rounded
 
 
+def check_amount(value: float) -> float:
+    if not math.isfinite(value) or value <= 0 or value > 10000:
+        raise HTTPException(status_code=400, detail="Enter the amount for that expense")
+    rounded = q2(value)
+    if rounded <= 0:
+        raise HTTPException(status_code=400, detail="Enter the amount for that expense")
+    return rounded
+
+
+def clean_expense_note(value: str) -> str:
+    note = clean_note(value)
+    if not note:
+        raise HTTPException(status_code=400, detail="Say what it was")
+    return note
+
+
 def settings_out(row: dict) -> dict:
     return {
         "display_name": row["display_name"],
@@ -224,6 +252,15 @@ def mile_out(row: dict) -> dict:
     }
 
 
+def expense_out(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "date": row["expense_date"],
+        "amount": row["amount"],
+        "note": row["note"],
+    }
+
+
 def task_out(row: dict) -> dict:
     return {
         "id": row["id"],
@@ -261,15 +298,15 @@ def totals(rows: list[dict], qty_key: str) -> tuple[float, float]:
     return q2(qty), sum_pay(pairs)
 
 
-def combined(left: float, right: float) -> float:
-    return q2(left + right)
+def combined(*parts: float) -> float:
+    return sum_amounts(parts)
 
 
 def payout_index(rows: list[dict]) -> dict[tuple[str, str, str], dict]:
     return {(row["kind"], row["period_start"], row["period_end"]): row for row in rows}
 
 
-def load_logs(conn) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+def load_logs(conn) -> tuple[list[dict], list[dict], list[dict], list[dict], list[dict]]:
     time_rows = [
         dict(row)
         for row in conn.execute(
@@ -286,12 +323,18 @@ def load_logs(conn) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
             "SELECT * FROM mileage_entries ORDER BY drive_date, created_at, id"
         )
     ]
+    expense_rows = [
+        dict(row)
+        for row in conn.execute(
+            "SELECT * FROM expense_entries ORDER BY expense_date, created_at, id"
+        )
+    ]
     payout_rows = [dict(row) for row in conn.execute("SELECT * FROM payouts ORDER BY paid_on, id")]
     task_rows = [
         dict(row)
         for row in conn.execute("SELECT * FROM tasks ORDER BY task_date, sort_order, id")
     ]
-    return time_rows, mile_rows, payout_rows, task_rows
+    return time_rows, mile_rows, payout_rows, task_rows, expense_rows
 
 
 def period_bounds(start: date, end: date, settings: dict, today: date) -> dict:
@@ -317,11 +360,13 @@ def period_bounds(start: date, end: date, settings: dict, today: date) -> dict:
     }
 
 
-def summarize(start: date, end: date, settings: dict, time_rows, mile_rows, payouts, today: date) -> dict:
+def summarize(start: date, end: date, settings: dict, time_rows, mile_rows, payouts, today: date, expense_rows) -> dict:
     timed = between(time_rows, "work_date", start, end)
     driven = between(mile_rows, "drive_date", start, end)
+    spent = between(expense_rows, "expense_date", start, end)
     hours, hours_pay = totals(timed, "hours")
     miles, mileage_pay = totals(driven, "miles")
+    expenses = sum_amounts(row["amount"] for row in spent)
     start_iso, end_iso = start.isoformat(), end.isoformat()
     meta = period_bounds(start, end, settings, today)
     return {
@@ -331,11 +376,13 @@ def summarize(start: date, end: date, settings: dict, time_rows, mile_rows, payo
         "hours_pay": hours_pay,
         "miles": miles,
         "mileage_pay": mileage_pay,
-        "combined": combined(hours_pay, mileage_pay),
+        "expenses": expenses,
+        "combined": combined(hours_pay, mileage_pay, expenses),
         "mixed_hour_rates": len({row["rate"] for row in timed}) > 1,
         "mixed_mile_rates": len({row["rate"] for row in driven}) > 1,
         "hours_payout": payout_out(payouts.get(("hours", start_iso, end_iso))),
         "mileage_payout": payout_out(payouts.get(("mileage", start_iso, end_iso))),
+        "expenses_payout": payout_out(payouts.get(("expenses", start_iso, end_iso))),
         **meta,
     }
 
@@ -375,11 +422,13 @@ def parse_range(start: str, end: str) -> tuple[date, date]:
     return first, last
 
 
-def build_report(settings, time_rows, mile_rows, payout_rows, task_rows, start: date, end: date, today: date) -> dict:
+def build_report(settings, time_rows, mile_rows, payout_rows, task_rows, expense_rows, start: date, end: date, today: date) -> dict:
     timed = between(time_rows, "work_date", start, end)
     driven = between(mile_rows, "drive_date", start, end)
+    spent = between(expense_rows, "expense_date", start, end)
     hours, hours_pay = totals(timed, "hours")
     miles, mileage_pay = totals(driven, "miles")
+    expenses = sum_amounts(row["amount"] for row in spent)
     tasks = [task_out(row) for row in task_rows if start.isoformat() <= row["task_date"] <= end.isoformat()]
     payouts = [
         payout_out(row)
@@ -395,11 +444,13 @@ def build_report(settings, time_rows, mile_rows, payout_rows, task_rows, start: 
         "hours_pay": hours_pay,
         "miles": miles,
         "mileage_pay": mileage_pay,
-        "combined": combined(hours_pay, mileage_pay),
+        "expenses": expenses,
+        "combined": combined(hours_pay, mileage_pay, expenses),
         "tasks_done": sum(1 for task in tasks if task["done"]),
         "tasks_open": sum(1 for task in tasks if not task["done"]),
         "time_entries": [time_out(row) for row in timed],
         "mileage_entries": [mile_out(row) for row in driven],
+        "expense_entries": [expense_out(row) for row in spent],
         "tasks": tasks,
         "payouts": payouts,
     }
@@ -453,7 +504,7 @@ def get_period(today: str | None = None, start: str | None = None, end: str | No
     day = resolve_today(today)
     with get_db().transaction() as conn:
         settings = dict(ensure_settings(conn, day))
-        time_rows, mile_rows, payout_rows, _tasks = load_logs(conn)
+        time_rows, mile_rows, payout_rows, _tasks, expense_rows = load_logs(conn)
     anchor = parse_day(settings["cycle_anchor"])
     if start and end:
         period_start, period_end = parse_range(start, end)
@@ -465,7 +516,7 @@ def get_period(today: str | None = None, start: str | None = None, end: str | No
         period_start, period_end = period_containing(requested, anchor, settings["cycle"])
     else:
         period_start, period_end = period_containing(day, anchor, settings["cycle"])
-    summary = summarize(period_start, period_end, settings, time_rows, mile_rows, payout_index(payout_rows), day)
+    summary = summarize(period_start, period_end, settings, time_rows, mile_rows, payout_index(payout_rows), day, expense_rows)
     return with_days(summary, time_rows, mile_rows)
 
 
@@ -474,12 +525,13 @@ def get_history(today: str | None = None):
     day = resolve_today(today)
     with get_db().transaction() as conn:
         settings = dict(ensure_settings(conn, day))
-        time_rows, mile_rows, payout_rows, _tasks = load_logs(conn)
+        time_rows, mile_rows, payout_rows, _tasks, expense_rows = load_logs(conn)
     anchor = parse_day(settings["cycle_anchor"])
     cycle = settings["cycle"]
     dates = [day - timedelta(days=60)]
     dates.extend(parse_day(row["work_date"]) for row in time_rows)
     dates.extend(parse_day(row["drive_date"]) for row in mile_rows)
+    dates.extend(parse_day(row["expense_date"]) for row in expense_rows)
     dates.extend(parse_day(row["period_start"]) for row in payout_rows)
     dates.extend(parse_day(row["paid_on"]) for row in payout_rows)
     earliest = min(dates)
@@ -501,11 +553,11 @@ def get_history(today: str | None = None):
             seen.add(key)
     periods = []
     for start, end in generated:
-        item = summarize(start, end, settings, time_rows, mile_rows, payouts, day)
+        item = summarize(start, end, settings, time_rows, mile_rows, payouts, day, expense_rows)
         item["recorded_only"] = False
         periods.append(item)
     for start, end in extras:
-        item = summarize(start, end, settings, time_rows, mile_rows, payouts, day)
+        item = summarize(start, end, settings, time_rows, mile_rows, payouts, day, expense_rows)
         item["recorded_only"] = True
         periods.append(item)
     received: dict[str, float] = {}
@@ -728,6 +780,58 @@ def delete_mileage(entry_id: int):
     return {"ok": True}
 
 
+@app.post("/api/expenses")
+def create_expense(body: ExpenseIn):
+    expense_date = parse_day(body.expense_date)
+    check_sane(expense_date)
+    check_past(expense_date)
+    amount = check_amount(body.amount)
+    note = clean_expense_note(body.note)
+    with get_db().transaction() as conn:
+        stamp = now_iso()
+        cur = conn.execute(
+            """
+            INSERT INTO expense_entries (expense_date, amount, note, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (expense_date.isoformat(), amount, note, stamp, stamp),
+        )
+        row = dict(conn.execute("SELECT * FROM expense_entries WHERE id = ?", (cur.lastrowid,)).fetchone())
+    return expense_out(row)
+
+
+@app.patch("/api/expenses/{entry_id}")
+def patch_expense(entry_id: int, body: ExpensePatch):
+    with get_db().transaction() as conn:
+        row = conn.execute("SELECT * FROM expense_entries WHERE id = ?", (entry_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="That expense isn't there anymore")
+        current = dict(row)
+        expense_date = current["expense_date"]
+        if body.expense_date is not None:
+            day = parse_day(body.expense_date)
+            check_sane(day)
+            check_past(day)
+            expense_date = day.isoformat()
+        amount = current["amount"] if body.amount is None else check_amount(body.amount)
+        note = current["note"] if body.note is None else clean_expense_note(body.note)
+        conn.execute(
+            "UPDATE expense_entries SET expense_date = ?, amount = ?, note = ?, updated_at = ? WHERE id = ?",
+            (expense_date, amount, note, now_iso(), entry_id),
+        )
+        updated = dict(conn.execute("SELECT * FROM expense_entries WHERE id = ?", (entry_id,)).fetchone())
+    return expense_out(updated)
+
+
+@app.delete("/api/expenses/{entry_id}")
+def delete_expense(entry_id: int):
+    with get_db().transaction() as conn:
+        cur = conn.execute("DELETE FROM expense_entries WHERE id = ?", (entry_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="That expense isn't there anymore")
+    return {"ok": True}
+
+
 @app.get("/api/tasks")
 def get_tasks(start: str = Query(...), end: str = Query(...)):
     first, last = parse_range(start, end)
@@ -801,8 +905,8 @@ def delete_task(task_id: int):
 
 @app.post("/api/payouts")
 def create_payout(body: PayoutIn):
-    if body.kind not in ("hours", "mileage", "both"):
-        raise HTTPException(status_code=400, detail="Pick hours or miles")
+    if body.kind not in ("hours", "mileage", "expenses", "both"):
+        raise HTTPException(status_code=400, detail="Pick hours, miles, or expenses")
     start = parse_day(body.period_start)
     end = parse_day(body.period_end)
     paid_on = parse_day(body.paid_on)
@@ -813,7 +917,7 @@ def create_payout(body: PayoutIn):
     if start > end or (end - start).days > 62:
         raise HTTPException(status_code=400, detail="That pay period doesn't look right")
     note = clean_note(body.note)
-    kinds = ("hours", "mileage") if body.kind == "both" else (body.kind,)
+    kinds = ("hours", "mileage", "expenses") if body.kind == "both" else (body.kind,)
     saved: dict[str, dict] = {}
     created = 0
     with get_db().transaction() as conn:
@@ -834,12 +938,18 @@ def create_payout(body: PayoutIn):
                     (start.isoformat(), end.isoformat()),
                 ).fetchall()
                 amount = sum_pay([(row["hours"], row["rate"]) for row in rows])
-            else:
+            elif kind == "mileage":
                 rows = conn.execute(
                     "SELECT miles, rate FROM mileage_entries WHERE drive_date BETWEEN ? AND ?",
                     (start.isoformat(), end.isoformat()),
                 ).fetchall()
                 amount = sum_pay([(row["miles"], row["rate"]) for row in rows])
+            else:
+                rows = conn.execute(
+                    "SELECT amount FROM expense_entries WHERE expense_date BETWEEN ? AND ?",
+                    (start.isoformat(), end.isoformat()),
+                ).fetchall()
+                amount = sum_amounts(row["amount"] for row in rows)
             cur = conn.execute(
                 """
                 INSERT INTO payouts (kind, period_start, period_end, amount, paid_on, note, created_at)
@@ -871,7 +981,7 @@ def dashboard(today: str | None = None, start: str | None = None, end: str | Non
     day = resolve_today(today)
     with get_db().transaction() as conn:
         settings = dict(ensure_settings(conn, day))
-        time_rows, mile_rows, payout_rows, task_rows = load_logs(conn)
+        time_rows, mile_rows, payout_rows, task_rows, expense_rows = load_logs(conn)
     anchor = parse_day(settings["cycle_anchor"])
     period_start, period_end = period_containing(day, anchor, settings["cycle"])
     if start and end:
@@ -881,7 +991,7 @@ def dashboard(today: str | None = None, start: str | None = None, end: str | Non
     else:
         range_start, range_end = period_start, period_end
     payouts = payout_index(payout_rows)
-    period = summarize(period_start, period_end, settings, time_rows, mile_rows, payouts, day)
+    period = summarize(period_start, period_end, settings, time_rows, mile_rows, payouts, day, expense_rows)
     worked = {
         row["work_date"]
         for row in between(time_rows, "work_date", period_start, period_end)
@@ -897,7 +1007,7 @@ def dashboard(today: str | None = None, start: str | None = None, end: str | Non
     for row in payout_rows:
         if month_start.isoformat() <= row["paid_on"] <= month_end.isoformat():
             received = q2(received + row["amount"])
-    report = build_report(settings, time_rows, mile_rows, payout_rows, task_rows, range_start, range_end, day)
+    report = build_report(settings, time_rows, mile_rows, payout_rows, task_rows, expense_rows, range_start, range_end, day)
     series = []
     hours_by_day: dict[str, float] = {}
     miles_by_day: dict[str, float] = {}
@@ -916,10 +1026,12 @@ def dashboard(today: str | None = None, start: str | None = None, end: str | Non
             "hours_pay": period["hours_pay"],
             "miles": period["miles"],
             "mileage_pay": period["mileage_pay"],
+            "expenses": period["expenses"],
             "combined": period["combined"],
             "days_worked": len(worked),
             "hours_payout": period["hours_payout"],
             "mileage_payout": period["mileage_payout"],
+            "expenses_payout": period["expenses_payout"],
             "payday": period["payday"],
         },
         "week": {
@@ -942,9 +1054,11 @@ def dashboard(today: str | None = None, start: str | None = None, end: str | Non
             "hours_pay": report["hours_pay"],
             "miles": report["miles"],
             "mileage_pay": report["mileage_pay"],
+            "expenses": report["expenses"],
             "combined": report["combined"],
             "tasks_done": report["tasks_done"],
             "tasks_open": report["tasks_open"],
+            "expense_entries": report["expense_entries"],
             "series": series,
         },
     }
@@ -956,8 +1070,8 @@ def export_csv(start: str, end: str, today: str | None = None):
     first, last = parse_range(start, end)
     with get_db().transaction() as conn:
         settings = dict(ensure_settings(conn, day))
-        time_rows, mile_rows, payout_rows, task_rows = load_logs(conn)
-    report = build_report(settings, time_rows, mile_rows, payout_rows, task_rows, first, last, day)
+        time_rows, mile_rows, payout_rows, task_rows, expense_rows = load_logs(conn)
+    report = build_report(settings, time_rows, mile_rows, payout_rows, task_rows, expense_rows, first, last, day)
     return Response(
         content=render_csv(report),
         media_type="text/csv; charset=utf-8",
@@ -971,8 +1085,8 @@ def export_pdf(start: str, end: str, today: str | None = None):
     first, last = parse_range(start, end)
     with get_db().transaction() as conn:
         settings = dict(ensure_settings(conn, day))
-        time_rows, mile_rows, payout_rows, task_rows = load_logs(conn)
-    report = build_report(settings, time_rows, mile_rows, payout_rows, task_rows, first, last, day)
+        time_rows, mile_rows, payout_rows, task_rows, expense_rows = load_logs(conn)
+    report = build_report(settings, time_rows, mile_rows, payout_rows, task_rows, expense_rows, first, last, day)
     return Response(
         content=render_pdf(report),
         media_type="application/pdf",

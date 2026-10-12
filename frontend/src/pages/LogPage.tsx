@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { Sheet, useApp } from '../app-context'
 import { clock, clockFace, dayNumber, formatDay, formatPeriod, hoursText, localDate, milesText, money, rateText, splitHours, weekday, weekdayShort } from '../format'
@@ -254,6 +254,7 @@ function RunningTimer({
   toast: (message: string) => void
 }) {
   const [localStart, setLocalStart] = useState(running.started_at)
+  const [editing, setEditing] = useState(false)
   const [picked, setPicked] = useState(() => minutesBack(running.created_at, running.started_at))
   const startRef = useRef(running.started_at)
   const pickedRef = useRef(picked)
@@ -263,16 +264,16 @@ function RunningTimer({
   const tail = useRef<Promise<void>>(Promise.resolve())
   createdRef.current = running.created_at
 
-  const rows = useMemo(() => {
-    const created = new Date(running.created_at)
-    const tapDay = localDate(created)
-    return WHEEL_BACK.map((mins) => {
-      const when = new Date(created.getTime() - mins * 60_000)
-      const day = localDate(when)
-      const face = clockFace(when)
-      return day === tapDay ? face : `${weekdayShort(day)} ${face}`
-    })
-  }, [running.created_at])
+  const created = new Date(running.created_at)
+  const tapDay = localDate(created)
+  const rows = editing
+    ? WHEEL_BACK.map((mins) => {
+        const when = new Date(created.getTime() - mins * 60_000)
+        const day = localDate(when)
+        const face = clockFace(when)
+        return day === tapDay ? face : `${weekdayShort(day)} ${face}`
+      })
+    : []
 
   useLayoutEffect(() => {
     const mins = minutesBack(running.created_at, startRef.current)
@@ -280,6 +281,11 @@ function RunningTimer({
     setPicked(mins)
     if (wheelRef.current) wheelRef.current.scrollTop = mins * WHEEL_ITEM
   }, [running.id, running.created_at])
+
+  useLayoutEffect(() => {
+    if (!editing || !wheelRef.current) return
+    wheelRef.current.scrollTop = pickedRef.current * WHEEL_ITEM
+  }, [editing])
 
   useEffect(() => {
     return () => {
@@ -331,6 +337,15 @@ function RunningTimer({
     apply(index)
   }
 
+  function closeEdit() {
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current)
+      saveTimer.current = null
+      void persist(startRef.current)
+    }
+    setEditing(false)
+  }
+
   async function clockOut() {
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current)
@@ -350,39 +365,45 @@ function RunningTimer({
         <span className="pulse" />
         <div>
           <div className="timer-time">{clock(localStart, now)}</div>
-          <div className="timer-start">
+          <button className="timer-start" type="button" onClick={() => (editing ? closeEdit() : setEditing(true))}>
             Started {clockFace(started)}
             {day !== today && ` · ${formatDay(day)}`}
-          </div>
+            {editing ? '' : ' · Edit'}
+          </button>
         </div>
         <button className="btn blush" type="button" onClick={() => void clockOut()}>Clock out</button>
       </div>
-      <div className="wheel-wrap">
-        <div className="wheel-mark" />
-        <div
-          className="wheel"
-          ref={wheelRef}
-          role="listbox"
-          aria-label="Roll the start time earlier"
-          tabIndex={0}
-          onScroll={onScroll}
-          onKeyDown={(event) => {
-            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
-            event.preventDefault()
-            const index = Math.max(0, Math.min(WHEEL_MINUTES, pickedRef.current + (event.key === 'ArrowUp' ? 1 : -1)))
-            wheelRef.current?.scrollTo({ top: index * WHEEL_ITEM, behavior: 'smooth' })
-          }}
-        >
-          <div className="wheel-pad" />
-          {rows.map((label, mins) => (
-            <div key={mins} className={mins === picked ? 'wheel-item on' : 'wheel-item'} role="option" aria-selected={mins === picked}>
-              {label}
+      {editing && (
+        <>
+          <div className="wheel-wrap">
+            <div className="wheel-mark" />
+            <div
+              className="wheel"
+              ref={wheelRef}
+              role="listbox"
+              aria-label="Roll the start time earlier"
+              tabIndex={0}
+              onScroll={onScroll}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+                event.preventDefault()
+                const index = Math.max(0, Math.min(WHEEL_MINUTES, pickedRef.current + (event.key === 'ArrowUp' ? 1 : -1)))
+                wheelRef.current?.scrollTo({ top: index * WHEEL_ITEM, behavior: 'smooth' })
+              }}
+            >
+              <div className="wheel-pad" />
+              {rows.map((label, mins) => (
+                <div key={mins} className={mins === picked ? 'wheel-item on' : 'wheel-item'} role="option" aria-selected={mins === picked}>
+                  {label}
+                </div>
+              ))}
+              <div className="wheel-pad" />
             </div>
-          ))}
-          <div className="wheel-pad" />
-        </div>
-      </div>
-      <p className="wheel-note">{earlierText(picked)}</p>
+          </div>
+          <p className="wheel-note">{earlierText(picked)}</p>
+          <button className="text-btn timer-done" type="button" onClick={closeEdit}>Done</button>
+        </>
+      )}
     </div>
   )
 }
@@ -541,10 +562,19 @@ function HistoryList({
                   <small>Miles</small>
                   <b>{money(item.mileage_pay)}</b>
                 </div>
+                {item.expenses > 0 && (
+                  <div>
+                    <small>Expenses</small>
+                    <b>{money(item.expenses)}</b>
+                  </div>
+                )}
               </div>
               <div className="badges">
                 <span className={item.hours_payout ? 'badge paid' : 'badge'}>{item.hours_payout ? 'Hours paid' : 'Hours open'}</span>
                 <span className={item.mileage_payout ? 'badge paid' : 'badge'}>{item.mileage_payout ? 'Miles paid' : 'Miles open'}</span>
+                {item.expenses > 0 && (
+                  <span className={item.expenses_payout ? 'badge paid' : 'badge'}>{item.expenses_payout ? 'Expenses paid' : 'Expenses open'}</span>
+                )}
               </div>
             </button>
           ))}

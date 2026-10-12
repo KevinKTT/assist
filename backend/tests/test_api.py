@@ -124,6 +124,78 @@ def test_mark_paid_covers_hours_and_miles(tmp_path):
         assert paid.status_code == 200
         assert paid.json()["hours"]["amount"] == 40
         assert paid.json()["mileage"]["amount"] == 5
+        assert paid.json()["expenses"]["amount"] == 0
+
+
+def test_expenses_roll_into_pay_and_exports(tmp_path):
+    with make_client(tmp_path) as client:
+        today = "2026-03-10"
+        client.put("/api/settings", params={"today": today}, json={
+            "display_name": "Katie",
+            "hourly_rate": 20,
+            "mileage_rate": 0.7,
+            "cycle": "biweekly",
+            "cycle_anchor": "2026-03-02",
+            "payday_offset_days": None,
+        })
+        client.post("/api/time", json={"work_date": "2026-03-03", "hours": 8, "note": ""})
+        blank = client.post("/api/expenses", json={"expense_date": "2026-03-03", "amount": 18.4, "note": "   "})
+        assert blank.status_code == 400
+        uber = client.post("/api/expenses", json={"expense_date": "2026-03-03", "amount": 18.4, "note": "Uber back"})
+        assert uber.status_code == 200
+        assert uber.json()["amount"] == 18.4
+        period = client.get("/api/periods", params={"today": today}).json()
+        assert period["expenses"] == 18.4
+        assert period["combined"] == 178.4
+        dash = client.get("/api/dashboard", params={"today": today}).json()
+        assert dash["range"]["expense_entries"][0]["note"] == "Uber back"
+        assert dash["period"]["expenses_payout"] is None
+        paid = client.post("/api/payouts", json={
+            "kind": "both",
+            "period_start": period["start"],
+            "period_end": period["end"],
+            "paid_on": "2026-03-10",
+            "note": "",
+        })
+        assert paid.status_code == 200
+        assert paid.json()["expenses"]["amount"] == 18.4
+        again = client.get("/api/periods", params={"today": today}).json()
+        assert again["expenses_payout"]["amount"] == 18.4
+        csv = client.get("/api/export/csv", params={"start": period["start"], "end": period["end"], "today": today})
+        assert "Uber back" in csv.text
+        assert "18.40" in csv.text
+        patched = client.patch(f"/api/expenses/{uber.json()['id']}", json={"amount": 20, "note": "Uber and tip"})
+        assert patched.status_code == 200
+        assert patched.json()["note"] == "Uber and tip"
+        removed = client.delete(f"/api/expenses/{uber.json()['id']}")
+        assert removed.status_code == 200
+
+
+def test_paid_periods_gain_an_expenses_payout(tmp_path):
+    with make_client(tmp_path) as client:
+        today = "2026-03-10"
+        client.put("/api/settings", params={"today": today}, json={
+            "display_name": "",
+            "hourly_rate": 20,
+            "mileage_rate": 0.5,
+            "cycle": "weekly",
+            "cycle_anchor": "2026-03-08",
+            "payday_offset_days": None,
+        })
+        period = client.get("/api/periods", params={"today": today}).json()
+        body = {
+            "period_start": period["start"],
+            "period_end": period["end"],
+            "paid_on": "2026-03-12",
+            "note": "",
+        }
+        assert client.post("/api/payouts", json={**body, "kind": "hours"}).status_code == 200
+        assert client.post("/api/payouts", json={**body, "kind": "mileage"}).status_code == 200
+        reset_db()
+        reopened = client.get("/api/periods", params={"today": today}).json()
+        assert reopened["hours_payout"]["amount"] == 0
+        assert reopened["mileage_payout"]["amount"] == 0
+        assert reopened["expenses_payout"]["amount"] == 0
 
 
 def test_manual_hours_and_minutes(tmp_path):

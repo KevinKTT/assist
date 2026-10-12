@@ -38,7 +38,11 @@ def hours_from_seconds(seconds: int) -> float:
 
 
 def sum_pay(pairs: list[tuple[float, float]]) -> float:
+    return sum_amounts([line_pay(qty, rate) for qty, rate in pairs])
+
+
+def sum_amounts(amounts) -> float:
     total = Decimal("0")
-    for qty, rate in pairs:
-        total += Decimal(str(line_pay(qty, rate)))
+    for amount in amounts:
+        total += Decimal(str(q2(amount)))
     return float(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
