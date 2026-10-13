@@ -101,6 +101,35 @@ reconcile. The client's offline maths are checked against the server's output in
 `frontend/src/domain/parity.test.ts` (regenerate the fixture with
 `uv run --directory backend python tests/generate_parity_fixture.py`).
 
+## Running it
+
+The container is set up to be left alone:
+
+- **Health checks.** `GET /api/health` is liveness (the process is up).
+  `GET /api/ready` is readiness and returns `503` if the database fails a quick
+  integrity check or the backup directory is not writable. The Docker healthcheck
+  polls `/api/ready`.
+- **Logs.** Written to stdout and captured by Docker with rotation (5 files of
+  10 MB). Set `ASSIST_LOG_LEVEL` (default `INFO`) to change verbosity.
+- **Limits.** The container is capped at 512 MB and 1 CPU so a problem can't take
+  the host down.
+- **Shutdown.** `stop_grace_period` is 20s; on stop the app closes the database
+  and stops its backup and heartbeat threads cleanly.
+
+### Monitoring
+
+Docker marks an unhealthy container but does not restart it. To actually be
+alerted when the server is down, use something outside the box:
+
+- Point a monitor (Uptime Kuma, healthchecks.io, ...) at `/api/ready` over
+  Tailscale. Uptime Kuma can send a notification (ntfy, email) when it fails.
+- Or set `ASSIST_HEARTBEAT_URL` to a healthchecks.io ping URL or ntfy topic. The
+  app pings it every `ASSIST_HEARTBEAT_SECONDS` (default 60). If the server dies,
+  the pings stop and the service raises the alarm.
+
+Access is over Tailscale (through Caddy for HTTPS), so there is no app-level
+login by design.
+
 ## Tests
 
 ```bash

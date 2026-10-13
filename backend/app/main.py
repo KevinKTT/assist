@@ -1,3 +1,5 @@
+import json
+import logging
 import math
 import mimetypes
 import os
@@ -13,9 +15,10 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.gzip import GZipMiddleware
 
-from app.backup import start_backup_thread
+from app.backup import start_backup_thread, stop_backup_thread
 from app.csv_export import render_csv
-from app.db import SCHEMA_VERSION, ensure_settings, get_db, load_settings, now_iso, parse_day, parse_dt
+from app.db import SCHEMA_VERSION, backup_dir, ensure_settings, get_db, load_settings, now_iso, parse_day, parse_dt, reset_db
+from app.heartbeat import start_heartbeat_thread, stop_heartbeat_thread
 from app.money import hours_from_minutes, hours_from_seconds, line_pay, nearest_minutes, q2, q4, sum_amounts, sum_pay
 from app.pdf_export import render_pdf
 from app.periods import (
@@ -35,11 +38,32 @@ mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("image/svg+xml", ".svg")
 
 
+log = logging.getLogger("assist")
+
+
+def configure_logging() -> None:
+    level = os.environ.get("ASSIST_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        force=True,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    configure_logging()
     db = get_db()
+    log.info("assist starting (data=%s, backups=%s)", db.path.parent, backup_dir())
     start_backup_thread(db.path)
-    yield
+    start_heartbeat_thread()
+    try:
+        yield
+    finally:
+        stop_heartbeat_thread()
+        stop_backup_thread()
+        reset_db()
+        log.info("assist stopped")
 
 
 app = FastAPI(title="assist", lifespan=lifespan)
@@ -520,8 +544,36 @@ SNAPSHOT_TABLES = (
 
 @app.get("/api/health")
 def health():
-    get_db()
+    # Liveness: the process is up. Deliberately does not touch the database.
     return {"ok": True}
+
+
+@app.get("/api/ready")
+def ready():
+    # Readiness: the database is readable and the backup directory is writable.
+    checks: dict[str, bool] = {}
+    try:
+        with get_db().transaction() as conn:
+            result = conn.execute("PRAGMA quick_check").fetchone()[0]
+        checks["database"] = result == "ok"
+    except Exception:
+        log.exception("readiness: database check failed")
+        checks["database"] = False
+    try:
+        dest = backup_dir()
+        dest.mkdir(parents=True, exist_ok=True)
+        probe = dest / ".write-probe"
+        probe.write_text("ok")
+        probe.unlink()
+        checks["backups"] = True
+    except Exception:
+        log.exception("readiness: backup directory is not writable")
+        checks["backups"] = False
+    ok = all(checks.values())
+    checks["ok"] = ok
+    if not ok:
+        return Response(content=json.dumps(checks), status_code=503, media_type="application/json")
+    return checks
 
 
 @app.get("/api/backup.json")

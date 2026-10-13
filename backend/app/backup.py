@@ -28,7 +28,7 @@ DEFAULT_KEEP_DAYS = 7
 REMOTE_KEEP = 30
 
 _backup_thread: threading.Thread | None = None
-_stop = threading.Event()
+_backup_stop: threading.Event | None = None
 
 
 def _stamp(when: datetime | None = None) -> str:
@@ -199,18 +199,30 @@ def run_backup(db_path: Path, interval_seconds: int = DEFAULT_INTERVAL_SECONDS) 
 
 
 def start_backup_thread(db_path: Path, interval_seconds: int = DEFAULT_INTERVAL_SECONDS) -> None:
-    global _backup_thread
-    if _backup_thread is not None:
+    global _backup_thread, _backup_stop
+    if _backup_thread is not None and _backup_thread.is_alive():
         return
+    stop = threading.Event()
+    _backup_stop = stop
 
     def loop() -> None:
-        while True:
+        while not stop.is_set():
             try:
                 run_backup(db_path, interval_seconds)
             except Exception:
                 log.exception("backup cycle failed")
-            if _stop.wait(interval_seconds):
+            if stop.wait(interval_seconds):
                 return
 
     _backup_thread = threading.Thread(target=loop, name="assist-backup", daemon=True)
     _backup_thread.start()
+
+
+def stop_backup_thread() -> None:
+    global _backup_thread, _backup_stop
+    if _backup_stop is not None:
+        _backup_stop.set()
+    if _backup_thread is not None:
+        _backup_thread.join(timeout=5)
+    _backup_thread = None
+    _backup_stop = None
