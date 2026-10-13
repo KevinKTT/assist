@@ -1,6 +1,6 @@
 # assist
 
-Hours, miles, and the day ahead. A small app for logging work, drives, and tasks, then seeing what a pay period is worth.
+Hours, miles, expenses, and the day ahead. A small app for logging work, drives, expenses, and tasks, then seeing what a pay period is worth.
 
 It is built for one person on their own server. There are no accounts.
 

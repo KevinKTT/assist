@@ -147,6 +147,9 @@ def test_expenses_roll_into_pay_and_exports(tmp_path):
         period = client.get("/api/periods", params={"today": today}).json()
         assert period["expenses"] == 18.4
         assert period["combined"] == 178.4
+        spent = next(item for item in period["days"] if item["date"] == "2026-03-03")
+        assert spent["expenses"] == 18.4
+        assert spent["expense_entries"][0]["note"] == "Uber back"
         dash = client.get("/api/dashboard", params={"today": today}).json()
         assert dash["range"]["expense_entries"][0]["note"] == "Uber back"
         assert dash["period"]["expenses_payout"] is None

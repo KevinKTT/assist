@@ -387,7 +387,7 @@ def summarize(start: date, end: date, settings: dict, time_rows, mile_rows, payo
     }
 
 
-def with_days(summary: dict, time_rows, mile_rows) -> dict:
+def with_days(summary: dict, time_rows, mile_rows, expense_rows) -> dict:
     start = parse_day(summary["start"])
     end = parse_day(summary["end"])
     days = []
@@ -395,6 +395,7 @@ def with_days(summary: dict, time_rows, mile_rows) -> dict:
         iso = day.isoformat()
         timed = [row for row in time_rows if row["work_date"] == iso]
         driven = [row for row in mile_rows if row["drive_date"] == iso]
+        spent = [row for row in expense_rows if row["expense_date"] == iso]
         hours, hours_pay = totals(timed, "hours")
         miles, mileage_pay = totals(driven, "miles")
         days.append({
@@ -403,8 +404,10 @@ def with_days(summary: dict, time_rows, mile_rows) -> dict:
             "hours_pay": hours_pay,
             "miles": miles,
             "mileage_pay": mileage_pay,
+            "expenses": sum_amounts(row["amount"] for row in spent),
             "time_entries": [time_out(row) for row in timed],
             "mileage_entries": [mile_out(row) for row in driven],
+            "expense_entries": [expense_out(row) for row in spent],
         })
     summary["days"] = days
     return summary
@@ -517,7 +520,7 @@ def get_period(today: str | None = None, start: str | None = None, end: str | No
     else:
         period_start, period_end = period_containing(day, anchor, settings["cycle"])
     summary = summarize(period_start, period_end, settings, time_rows, mile_rows, payout_index(payout_rows), day, expense_rows)
-    return with_days(summary, time_rows, mile_rows)
+    return with_days(summary, time_rows, mile_rows, expense_rows)
 
 
 @app.get("/api/history")

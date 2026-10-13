@@ -309,6 +309,13 @@ h2 { font-family: var(--display); font-weight: 600; }
   flex: 1;
   min-width: 0;
 }
+.entry-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
 .entry-pay { margin-left: auto; font-weight: 800; color: var(--rose-deep); }
 .expenses .entry {
   background: white;
@@ -325,7 +332,7 @@ h2 { font-family: var(--display); font-weight: 600; }
   bottom: 0;
   width: min(480px, 100%);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   background: rgba(255, 252, 248, 0.94);
   backdrop-filter: blur(16px);
   border-top: 1px solid rgba(255, 199, 243, 0.9);
@@ -341,6 +348,7 @@ h2 { font-family: var(--display); font-weight: 600; }
   font-size: 11px;
   font-weight: 800;
   text-decoration: none;
+  white-space: nowrap;
 }
 .tab .ico {
   width: 36px;

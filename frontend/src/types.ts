@@ -53,8 +53,10 @@ export type PeriodDay = {
   hours_pay: number
   miles: number
   mileage_pay: number
+  expenses: number
   time_entries: TimeEntry[]
   mileage_entries: MileageEntry[]
+  expense_entries: ExpenseEntry[]
 }
 
 export type PeriodDetail = {
@@ -157,4 +159,4 @@ export type Running = {
   note: string
 }
 
-export type Kind = 'hours' | 'mileage'
+export type Kind = 'hours' | 'mileage' | 'expenses'

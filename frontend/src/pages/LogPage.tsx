@@ -2,13 +2,16 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { Sheet, useApp } from '../app-context'
 import { clock, clockFace, dayNumber, formatDay, formatPeriod, hoursText, localDate, milesText, money, rateText, splitHours, weekday, weekdayShort } from '../format'
-import type { HistoryMonth, HistoryPeriod, Kind, MileageEntry, PeriodDetail, Running, Settings, TimeEntry } from '../types'
+import type { ExpenseEntry, HistoryMonth, HistoryPeriod, Kind, MileageEntry, PeriodDay, PeriodDetail, Running, Settings, TimeEntry } from '../types'
+
+type LogEntry = TimeEntry | MileageEntry | ExpenseEntry
 
 type SheetState =
   | null
   | { type: 'add'; date: string }
   | { type: 'time'; entry: TimeEntry }
   | { type: 'mile'; entry: MileageEntry }
+  | { type: 'expense'; entry: ExpenseEntry }
 
 export function HoursPage() {
   return <LogPage kind="hours" />
@@ -16,6 +19,10 @@ export function HoursPage() {
 
 export function MilesPage() {
   return <LogPage kind="mileage" />
+}
+
+export function ExpensesPage() {
+  return <LogPage kind="expenses" />
 }
 
 function LogPage({ kind }: { kind: Kind }) {
@@ -121,7 +128,13 @@ function LogPage({ kind }: { kind: Kind }) {
   }
 
   const shown = view === 'history' && drill ? drill : period
-  const title = kind === 'hours' ? 'Hours' : 'Miles'
+  const title = pageTitle(kind)
+
+  function openEntry(entry: LogEntry) {
+    if ('hours' in entry) setSheet({ type: 'time', entry })
+    else if ('miles' in entry) setSheet({ type: 'mile', entry })
+    else setSheet({ type: 'expense', entry })
+  }
 
   return (
     <main className="screen">
@@ -161,10 +174,7 @@ function LogPage({ kind }: { kind: Kind }) {
           showTimer={kind === 'hours' && !running}
           onAdd={() => setSheet({ type: 'add', date: today })}
           onStart={() => void startTimer()}
-          onEdit={(entry) => {
-            if ('hours' in entry) setSheet({ type: 'time', entry })
-            else setSheet({ type: 'mile', entry })
-          }}
+          onEdit={openEntry}
         />
       )}
       {view === 'period' && period && settings && (
@@ -175,10 +185,7 @@ function LogPage({ kind }: { kind: Kind }) {
             kind={kind}
             today={today}
             onAdd={(date) => setSheet({ type: 'add', date: date > today ? today : date })}
-            onEdit={(entry) => {
-              if ('hours' in entry) setSheet({ type: 'time', entry })
-              else setSheet({ type: 'mile', entry })
-            }}
+            onEdit={openEntry}
           />
         </>
       )}
@@ -190,10 +197,7 @@ function LogPage({ kind }: { kind: Kind }) {
             kind={kind}
             today={today}
             onAdd={(date) => setSheet({ type: 'add', date })}
-            onEdit={(entry) => {
-              if ('hours' in entry) setSheet({ type: 'time', entry })
-              else setSheet({ type: 'mile', entry })
-            }}
+            onEdit={openEntry}
           />
         </>
       )}
@@ -423,26 +427,21 @@ function TodayCard({
   showTimer: boolean
   onAdd: () => void
   onStart: () => void
-  onEdit: (entry: TimeEntry | MileageEntry) => void
+  onEdit: (entry: LogEntry) => void
 }) {
   const day = period.days.find((item) => item.date === today)
-  const figure = kind === 'hours' ? hoursText(day?.hours ?? 0) : milesText(day?.miles ?? 0)
-  const entries = kind === 'hours' ? day?.time_entries ?? [] : day?.mileage_entries ?? []
+  const entries = dayEntries(day, kind)
   return (
     <section className="card">
       <p className="eyebrow">{weekday(today)} · {formatDay(today)}</p>
-      <div className="today-figure">{figure}</div>
+      <div className="today-figure">{todayFigure(day, kind)}</div>
       <div className="card-actions">
         {showTimer && <button className="btn blush wide" type="button" onClick={onStart}>Clock in</button>}
-        <button className="btn ghost" type="button" onClick={onAdd}>{kind === 'hours' ? 'Add hours' : 'Add miles'}</button>
+        <button className="btn ghost" type="button" onClick={onAdd}>{addLabel(kind)}</button>
       </div>
       {entries.length === 0 && <p className="quiet">Nothing logged today</p>}
       {entries.map((entry) => (
-        <button key={entry.id} className="entry today-entry" type="button" onClick={() => onEdit(entry)}>
-          <span>{'hours' in entry ? hoursText(entry.hours) : milesText(entry.miles)}</span>
-          {'source' in entry && entry.source === 'timer' && <em>clocked</em>}
-          {entry.note ? <span className="entry-note">{entry.note}</span> : <span className="entry-note" />}
-        </button>
+        <EntryButton key={entry.id} entry={entry} today onEdit={onEdit} />
       ))}
     </section>
   )
@@ -457,19 +456,21 @@ function PeriodCard({
   kind: Kind
   settings: Settings
 }) {
-  const live = kind === 'hours' ? period.hours_pay : period.mileage_pay
+  const live = kind === 'hours' ? period.hours_pay : kind === 'mileage' ? period.mileage_pay : period.expenses
   return (
     <section className="card">
       <p className="eyebrow">{formatPeriod(period.start, period.end)}</p>
       <div className="money">{money(live)}</div>
       <p className="sub">
-        {kind === 'hours' ? hoursText(period.hours) : milesText(period.miles)} · {rateLine(period, kind, settings)}
+        {kind === 'expenses'
+          ? expenseCountText(period)
+          : `${kind === 'hours' ? hoursText(period.hours) : milesText(period.miles)} · ${rateLine(period, kind, settings)}`}
       </p>
     </section>
   )
 }
 
-function rateLine(period: PeriodDetail, kind: Kind, settings: Settings) {
+function rateLine(period: PeriodDetail, kind: 'hours' | 'mileage', settings: Settings) {
   if (kind === 'hours') {
     if (period.mixed_hour_rates) return 'rates vary'
     const rate = period.days.flatMap((day) => day.time_entries)[0]?.rate ?? settings.hourly_rate
@@ -493,15 +494,16 @@ function DayList({
   kind: Kind
   today: string
   onAdd: (date: string) => void
-  onEdit: (entry: TimeEntry | MileageEntry) => void
+  onEdit: (entry: LogEntry) => void
 }) {
   return (
     <div>
       {period.days.map((day) => {
-        const entries = kind === 'hours' ? day.time_entries : day.mileage_entries
+        const entries = dayEntries(day, kind)
         const empty = entries.length === 0
-        const qty = kind === 'hours' ? hoursText(day.hours) : milesText(day.miles)
-        const pay = kind === 'hours' ? day.hours_pay : day.mileage_pay
+        const total = kind === 'expenses'
+          ? money(day.expenses)
+          : `${kind === 'hours' ? hoursText(day.hours) : milesText(day.miles)} · ${money(kind === 'hours' ? day.hours_pay : day.mileage_pay)}`
         const classes = ['dayblock', day.date === today ? 'today' : '', empty ? 'empty' : ''].filter(Boolean).join(' ')
         return (
           <section key={day.date} className={classes}>
@@ -510,23 +512,54 @@ function DayList({
                 <span>{weekdayShort(day.date)}</span>
                 <strong>{dayNumber(day.date)}</strong>
               </div>
-              <div className="daytotal">{empty ? '—' : `${qty} · ${money(pay)}`}</div>
+              <div className="daytotal">{empty ? '—' : total}</div>
               {day.date <= today ? (
                 <button className="mini-plus" type="button" aria-label={`Add for ${formatDay(day.date)}`} onClick={() => onAdd(day.date)}>+</button>
               ) : <span />}
             </div>
             {entries.map((entry) => (
-              <button key={entry.id} className="entry" type="button" onClick={() => onEdit(entry)}>
-                <span>{'hours' in entry ? hoursText(entry.hours) : milesText(entry.miles)}</span>
-                {'source' in entry && entry.source === 'timer' && <em>clocked</em>}
-                {entry.note ? <span className="entry-note">{entry.note}</span> : <span className="entry-note" />}
-                <span className="entry-pay">{money(entry.pay)}</span>
-              </button>
+              <EntryButton key={entry.id} entry={entry} onEdit={onEdit} />
             ))}
           </section>
         )
       })}
     </div>
+  )
+}
+
+function EntryButton({
+  entry,
+  today = false,
+  onEdit,
+}: {
+  entry: LogEntry
+  today?: boolean
+  onEdit: (entry: LogEntry) => void
+}) {
+  const expense = 'amount' in entry
+  return (
+    <button className={today ? 'entry today-entry' : 'entry'} type="button" onClick={() => onEdit(entry)}>
+      {expense ? (
+        today ? (
+          <>
+            <span>{money(entry.amount)}</span>
+            <span className="entry-note">{entry.note}</span>
+          </>
+        ) : (
+          <>
+            <span className="entry-name">{entry.note}</span>
+            <span className="entry-pay">{money(entry.amount)}</span>
+          </>
+        )
+      ) : (
+        <>
+          <span>{'hours' in entry ? hoursText(entry.hours) : milesText(entry.miles)}</span>
+          {'source' in entry && entry.source === 'timer' && <em>clocked</em>}
+          {entry.note ? <span className="entry-note">{entry.note}</span> : <span className="entry-note" />}
+          {!today && 'pay' in entry && <span className="entry-pay">{money(entry.pay)}</span>}
+        </>
+      )}
+    </button>
   )
 }
 
@@ -562,8 +595,8 @@ function HistoryList({
                   <small>Miles</small>
                   <b>{money(item.mileage_pay)}</b>
                 </div>
-                {item.expenses > 0 && (
-                  <div>
+                {(kind === 'expenses' || item.expenses > 0) && (
+                  <div className={kind === 'expenses' ? 'emph' : ''}>
                     <small>Expenses</small>
                     <b>{money(item.expenses)}</b>
                   </div>
@@ -572,7 +605,7 @@ function HistoryList({
               <div className="badges">
                 <span className={item.hours_payout ? 'badge paid' : 'badge'}>{item.hours_payout ? 'Hours paid' : 'Hours open'}</span>
                 <span className={item.mileage_payout ? 'badge paid' : 'badge'}>{item.mileage_payout ? 'Miles paid' : 'Miles open'}</span>
-                {item.expenses > 0 && (
+                {(kind === 'expenses' || item.expenses > 0) && (
                   <span className={item.expenses_payout ? 'badge paid' : 'badge'}>{item.expenses_payout ? 'Expenses paid' : 'Expenses open'}</span>
                 )}
               </div>
@@ -604,14 +637,47 @@ function EntrySheet({
       )}
       {sheet?.type === 'time' && <LogForm kind="hours" today={today} entry={sheet.entry} onDone={onDone} />}
       {sheet?.type === 'mile' && <LogForm kind="mileage" today={today} entry={sheet.entry} onDone={onDone} />}
+      {sheet?.type === 'expense' && <LogForm kind="expenses" today={today} entry={sheet.entry} onDone={onDone} />}
     </Sheet>
   )
 }
 
 function sheetTitle(sheet: SheetState, kind: Kind) {
   if (!sheet) return ''
-  if (sheet.type === 'add') return kind === 'hours' ? 'Add hours' : 'Add miles'
-  return kind === 'hours' ? 'Edit hours' : 'Edit drive'
+  if (sheet.type === 'add') return addLabel(kind)
+  if (kind === 'hours') return 'Edit hours'
+  if (kind === 'mileage') return 'Edit drive'
+  return 'Edit expense'
+}
+
+function pageTitle(kind: Kind) {
+  if (kind === 'hours') return 'Hours'
+  if (kind === 'mileage') return 'Miles'
+  return 'Expenses'
+}
+
+function addLabel(kind: Kind) {
+  if (kind === 'hours') return 'Add hours'
+  if (kind === 'mileage') return 'Add miles'
+  return 'Add expense'
+}
+
+function dayEntries(day: PeriodDay | undefined, kind: Kind): LogEntry[] {
+  if (!day) return []
+  if (kind === 'hours') return day.time_entries
+  if (kind === 'mileage') return day.mileage_entries
+  return day.expense_entries
+}
+
+function todayFigure(day: PeriodDay | undefined, kind: Kind) {
+  if (kind === 'hours') return hoursText(day?.hours ?? 0)
+  if (kind === 'mileage') return milesText(day?.miles ?? 0)
+  return money(day?.expenses ?? 0)
+}
+
+function expenseCountText(period: PeriodDetail) {
+  const count = period.days.reduce((sum, day) => sum + day.expense_entries.length, 0)
+  return count === 1 ? '1 expense' : `${count} expenses`
 }
 
 function LogForm({
@@ -624,12 +690,12 @@ function LogForm({
   kind: Kind
   today: string
   date?: string
-  entry?: TimeEntry | MileageEntry
+  entry?: LogEntry
   onDone: (message: string) => void
 }) {
   const starting = entry && 'hours' in entry ? splitHours(entry.hours) : null
   const [day, setDay] = useState(entry?.date ?? date ?? today)
-  const [amount, setAmount] = useState(entry && 'miles' in entry ? String(entry.miles) : '')
+  const [amount, setAmount] = useState(entry && 'miles' in entry ? String(entry.miles) : entry && 'amount' in entry ? String(entry.amount) : '')
   const [hoursPart, setHoursPart] = useState(starting ? String(starting.hours) : '')
   const [minutesPart, setMinutesPart] = useState(starting ? String(starting.minutes) : '')
   const [note, setNote] = useState(entry?.note ?? '')
@@ -656,6 +722,15 @@ function LogForm({
         return
       }
       value = (hours * 60 + minutes) / 60
+    } else if (kind === 'expenses') {
+      if (!note.trim()) {
+        setProblem('Say what it was')
+        return
+      }
+      if (!Number.isFinite(value) || value <= 0) {
+        setProblem('Enter the amount')
+        return
+      }
     } else if (!Number.isFinite(value) || value <= 0) {
       setProblem('Enter the miles')
       return
@@ -667,6 +742,10 @@ function LogForm({
         const body = { work_date: day, hours: value, note }
         if (entry) await api(`/api/time/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
         else await api('/api/time', { method: 'POST', body: JSON.stringify(body) })
+      } else if (kind === 'expenses') {
+        const body = { expense_date: day, amount: value, note }
+        if (entry) await api(`/api/expenses/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+        else await api('/api/expenses', { method: 'POST', body: JSON.stringify(body) })
       } else {
         const body = { drive_date: day, miles: value, note }
         if (entry) await api(`/api/mileage/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
@@ -688,7 +767,8 @@ function LogForm({
     }
     setBusy(true)
     try {
-      await api(kind === 'hours' ? `/api/time/${entry.id}` : `/api/mileage/${entry.id}`, { method: 'DELETE' })
+      const path = kind === 'hours' ? `/api/time/${entry.id}` : kind === 'expenses' ? `/api/expenses/${entry.id}` : `/api/mileage/${entry.id}`
+      await api(path, { method: 'DELETE' })
       onDone('Deleted')
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'Could not delete')
@@ -715,13 +795,13 @@ function LogForm({
         </div>
       ) : (
         <label className="field">
-          <span>Miles</span>
-          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
+          <span>{kind === 'expenses' ? 'Amount' : 'Miles'}</span>
+          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={kind === 'expenses' ? '0.00' : '0'} autoFocus />
         </label>
       )}
       <label className="field">
-        <span>Note</span>
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={kind === 'hours' ? 'Optional' : 'Where to?'} />
+        <span>{kind === 'expenses' ? 'What was it?' : 'Note'}</span>
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={kind === 'hours' ? 'Optional' : kind === 'expenses' ? 'Uber back' : 'Where to?'} required={kind === 'expenses'} />
       </label>
       {problem && <p className="mismatch">{problem}</p>}
       <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>

@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppProvider } from './app-context'
 import { DaysPage } from './pages/DaysPage'
-import { HoursPage, MilesPage } from './pages/LogPage'
+import { ExpensesPage, HoursPage, MilesPage } from './pages/LogPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { Shell } from './pages/Shell'
 
@@ -13,6 +13,7 @@ export default function App() {
           <Route element={<Shell />}>
             <Route index element={<HoursPage />} />
             <Route path="miles" element={<MilesPage />} />
+            <Route path="expenses" element={<ExpensesPage />} />
             <Route path="days" element={<DaysPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
