@@ -75,18 +75,31 @@ Snapshots are uploaded under timestamped names and the remote keeps the newest
 30, so a bad snapshot can never overwrite a good one. If Seafile is unreachable,
 the upload is logged and retried on the next cycle; the app is unaffected.
 
-## Surviving network hiccups
+## Offline and syncing
 
-Every record has a stable `uid`. When the app creates something it sends that
-`uid`, and the server treats the same `uid` as the same record, so a request that
-is retried after a dropped connection can never create a duplicate. Edits and
-deletes are idempotent too — deleting something that is already gone is not an
-error. The web client retries failed requests a couple of times with backoff, so
-a brief blip is usually invisible.
+The web app is offline-first. It keeps everything in the browser (IndexedDB) and
+works with no connection at all:
+
+- Reads come from the local copy, so the app opens and shows your data instantly
+  even when the server is unreachable.
+- Writes are saved locally first and queued, then sent when the server is
+  reachable again. A banner shows "Offline" or how many changes are waiting.
+- The running timer, logging hours/miles/expenses, tasks, marking a period paid,
+  and CSV export all work offline. PDF export needs the server.
+- It syncs on reconnect, when you return to the app, every 30 seconds, and right
+  after a change. A successful sync replaces the local copy with the server's.
+
+Every record has a stable `uid`. Creates send that `uid`, and the server treats
+the same `uid` as the same record, so a retried request can never create a
+duplicate. Edits and deletes are idempotent — deleting something already gone is
+not an error. The client also retries failed requests with backoff, so a brief
+blip is usually invisible.
 
 `GET /api/sync` returns the full state (settings, entries, tasks, payouts, and
-any running timer) with each record's `uid` and `updated_at`, which is what the
-client uses to reconcile.
+any running timer) with each record's `uid`, which is what the client uses to
+reconcile. The client's offline maths are checked against the server's output in
+`frontend/src/domain/parity.test.ts` (regenerate the fixture with
+`uv run --directory backend python tests/generate_parity_fixture.py`).
 
 ## Tests
 

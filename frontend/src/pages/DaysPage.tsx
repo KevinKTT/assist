@@ -1,37 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../api'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Sheet, useApp } from '../app-context'
 import { IconDays } from '../icons'
-import { newUid } from '../uid'
 import { addDays, formatMonth, formatWeek, localDate, parseISODate, sundayOnOrBefore, weekday, weekdayShort } from '../format'
+import { db } from '../store/db'
+import { createTask, deleteTask, updateTask } from '../store/repository'
 import type { Task } from '../types'
 
 export function DaysPage() {
-  const { today, revision, toast, bump } = useApp()
+  const { today, toast } = useApp()
   const [weekStart, setWeekStart] = useState(() => sundayOnOrBefore(parseISODate(today)))
-  const [tasks, setTasks] = useState<Task[]>([])
   const [calOpen, setCalOpen] = useState(false)
   const [cursor, setCursor] = useState(() => new Date())
   const [sheet, setSheet] = useState<{ date: string; task?: Task } | null>(null)
   const start = useRef<{ x: number; y: number } | null>(null)
+  const tasks = useLiveQuery(() => db.tasks.toArray(), [], [] as Task[])
   const weekIso = localDate(weekStart)
-  const weekEnd = localDate(addDays(weekStart, 6))
   const days = Array.from({ length: 7 }, (_, i) => localDate(addDays(weekStart, i)))
   const thisWeek = localDate(sundayOnOrBefore(parseISODate(today))) === weekIso
-
-  useEffect(() => {
-    let live = true
-    api<Task[]>(`/api/tasks?start=${weekIso}&end=${weekEnd}`)
-      .then((rows) => {
-        if (live) setTasks(rows)
-      })
-      .catch((err: Error) => {
-        if (live) toast(err.message)
-      })
-    return () => {
-      live = false
-    }
-  }, [weekIso, weekEnd, revision, toast])
 
   function shift(dir: number) {
     setWeekStart((current) => addDays(current, dir * 7))
@@ -39,12 +25,10 @@ export function DaysPage() {
   }
 
   async function toggle(task: Task) {
-    setTasks((list) => list.map((item) => (item.id === task.id ? { ...item, done: !item.done } : item)))
     try {
-      await api(`/api/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify({ done: !task.done }) })
+      await updateTask(task.uid, { done: !task.done })
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not update')
-      bump()
     }
   }
 
@@ -113,7 +97,7 @@ export function DaysPage() {
               <div>
                 {items.length === 0 && <p className="quiet">Nothing yet</p>}
                 {items.map((task) => (
-                  <div key={task.id} className={task.done ? 'task done' : 'task'}>
+                  <div key={task.uid} className={task.done ? 'task done' : 'task'}>
                     <button
                       className={task.done ? 'check on' : 'check'}
                       type="button"
@@ -149,7 +133,6 @@ export function DaysPage() {
         onDone={(message) => {
           setSheet(null)
           toast(message)
-          bump()
         }}
       />
     </main>
@@ -236,12 +219,9 @@ function TaskSheet({
     setBusy(true)
     try {
       if (sheet?.task) {
-        await api(`/api/tasks/${sheet.task.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ title, task_date: date }),
-        })
+        await updateTask(sheet.task.uid, { title, date })
       } else {
-        await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title, task_date: date, uid: newUid() }) })
+        await createTask({ date, title })
       }
       onDone('Saved')
     } catch (err) {
@@ -259,7 +239,7 @@ function TaskSheet({
     }
     setBusy(true)
     try {
-      await api(`/api/tasks/${sheet.task.id}`, { method: 'DELETE' })
+      await deleteTask(sheet.task.uid)
       onDone('Deleted')
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'Could not delete')

@@ -1078,12 +1078,13 @@ def create_payout(body: PayoutIn):
                     (start.isoformat(), end.isoformat()),
                 ).fetchall()
                 amount = sum_amounts(row["amount"] for row in rows)
+            row_uid = f"{body.uid}-{kind}" if body.uid else uuid4().hex
             cur = conn.execute(
                 """
                 INSERT INTO payouts (kind, period_start, period_end, amount, paid_on, note, created_at, uid)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (kind, start.isoformat(), end.isoformat(), amount, paid_on.isoformat(), note, now_iso(), uuid4().hex),
+                (kind, start.isoformat(), end.isoformat(), amount, paid_on.isoformat(), note, now_iso(), row_uid),
             )
             row = dict(conn.execute("SELECT * FROM payouts WHERE id = ?", (cur.lastrowid,)).fetchone())
             saved[kind] = payout_out(row)

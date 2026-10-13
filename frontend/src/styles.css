@@ -680,3 +680,28 @@ h2 { font-family: var(--display); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; }
 }
+
+.syncbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+.syncbar.offline { background: #ffe1dc; color: #9a3b2b; }
+.syncbar.pending { background: var(--blush-soft); color: var(--rose-deep); }
+.syncbar.syncing { background: var(--cream-deep); color: var(--muted); cursor: default; justify-content: center; }
+.syncbar-action {
+  flex: none;
+  text-decoration: underline;
+  font-weight: 800;
+}

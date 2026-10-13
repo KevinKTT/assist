@@ -1,25 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useApp } from '../app-context'
 import { IconCar, IconChart, IconClock, IconDays, IconGear, IconReceipt, Logo } from '../icons'
+import type { SyncState } from '../store/sync'
 
 export function Shell() {
-  const { settings, error, refresh, openSettings } = useApp()
-  if (!settings) {
-    return (
-      <div className="boot">
-        <div>
-          <Logo className="logo" />
-          <p className="wordmark">assist</p>
-          {error && (
-            <>
-              <p className="muted">{error}</p>
-              <button className="btn blush" type="button" onClick={() => void refresh()}>Try again</button>
-            </>
-          )}
-        </div>
-      </div>
-    )
-  }
+  const { sync, syncNow, openSettings } = useApp()
   return (
     <div className="app">
       <header className="top">
@@ -31,6 +16,7 @@ export function Shell() {
           <IconGear />
         </button>
       </header>
+      <SyncBanner sync={sync} onRetry={syncNow} />
       <Outlet />
       <nav className="tabbar" aria-label="Primary">
         <NavLink to="/" end className={({ isActive }) => (isActive ? 'tab active' : 'tab')}>
@@ -56,4 +42,33 @@ export function Shell() {
       </nav>
     </div>
   )
+}
+
+function SyncBanner({ sync, onRetry }: { sync: SyncState; onRetry: () => void }) {
+  if (sync.status === 'offline') {
+    return (
+      <button className="syncbar offline" type="button" onClick={onRetry}>
+        <span>
+          Offline. Everything you add is saved on this device and will sync when you're back.
+        </span>
+        <span className="syncbar-action">Retry</span>
+      </button>
+    )
+  }
+  if (sync.status === 'pending') {
+    return (
+      <button className="syncbar pending" type="button" onClick={onRetry}>
+        <span>{sync.pending} change{sync.pending === 1 ? '' : 's'} waiting to sync.</span>
+        <span className="syncbar-action">Sync now</span>
+      </button>
+    )
+  }
+  if (sync.status === 'syncing') {
+    return (
+      <div className="syncbar syncing">
+        <span>Syncing…</span>
+      </div>
+    )
+  }
+  return null
 }
