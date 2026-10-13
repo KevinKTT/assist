@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useApp } from '../app-context'
-import { IconCar, IconChart, IconClock, IconDays, IconGear, Logo } from '../icons'
+import { IconCar, IconChart, IconClock, IconDays, IconGear, IconReceipt, Logo } from '../icons'
 
 export function Shell() {
   const { settings, error, refresh, openSettings } = useApp()
@@ -40,6 +40,10 @@ export function Shell() {
         <NavLink to="/miles" className={({ isActive }) => (isActive ? 'tab active' : 'tab')}>
           <span className="ico"><IconCar /></span>
           Miles
+        </NavLink>
+        <NavLink to="/expenses" className={({ isActive }) => (isActive ? 'tab active' : 'tab')}>
+          <span className="ico"><IconReceipt /></span>
+          Expense
         </NavLink>
         <NavLink to="/days" className={({ isActive }) => (isActive ? 'tab active' : 'tab')}>
           <span className="ico"><IconDays /></span>

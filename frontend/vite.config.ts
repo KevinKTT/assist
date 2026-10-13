@@ -11,7 +11,7 @@ export default defineConfig({
       manifest: {
         name: 'assist',
         short_name: 'assist',
-        description: 'Hours, miles, and the day ahead',
+        description: 'Hours, miles, expenses, and the day ahead',
         theme_color: '#FFF6EE',
         background_color: '#FFF6EE',
         display: 'standalone',
