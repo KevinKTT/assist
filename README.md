@@ -41,6 +41,32 @@ ASSIST_DATA=/srv/assist docker compose up -d
 
 Chrome can install it on a phone once this is reached over HTTPS.
 
+### Configuration
+
+Copy `.env.example` to `.env` and edit it:
+
+```bash
+cp .env.example .env
+```
+
+Every setting is optional. The defaults are:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `ASSIST_PORT` | `8080` | Host port the app is served on (`http://<host>:8080`) |
+| `ASSIST_DATA` | `./data` | Host folder for the database |
+| `ASSIST_BACKUPS` | `./backups` | Host folder for snapshots |
+| `ASSIST_LOG_LEVEL` | `INFO` | Log verbosity |
+| `ASSIST_HEARTBEAT_URL` | *(off)* | Pinged on a timer so a down server is noticed |
+| `ASSIST_HEARTBEAT_SECONDS` | `60` | How often to ping |
+| `SEAFILE_URL` | *(off)* | Seafile base URL for off-host backups |
+| `SEAFILE_TOKEN` | *(off)* | Seafile API token |
+| `SEAFILE_REPO_ID` | *(off)* | Seafile library to upload into |
+| `SEAFILE_DIR` | `/assist-backups` | Folder inside that library |
+
+`.env` is git-ignored; `.env.example` is the committed template with notes on
+where to find each value (the Seafile URL, token, and library id).
+
 ## Backups
 
 assist snapshots its database on startup and hourly, into `./backups` on the
