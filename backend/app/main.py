@@ -1,17 +1,21 @@
 import math
 import mimetypes
 import os
+import re
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.gzip import GZipMiddleware
 
+from app.backup import start_backup_thread
 from app.csv_export import render_csv
-from app.db import ensure_settings, get_db, load_settings, now_iso, parse_day, parse_dt
+from app.db import SCHEMA_VERSION, ensure_settings, get_db, load_settings, now_iso, parse_day, parse_dt
 from app.money import hours_from_minutes, hours_from_seconds, line_pay, nearest_minutes, q2, q4, sum_amounts, sum_pay
 from app.pdf_export import render_pdf
 from app.periods import (
@@ -33,7 +37,8 @@ mimetypes.add_type("image/svg+xml", ".svg")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    get_db()
+    db = get_db()
+    start_backup_thread(db.path)
     yield
 
 
@@ -54,6 +59,7 @@ class TimeIn(BaseModel):
     work_date: str
     hours: float
     note: str = ""
+    uid: str | None = None
 
 
 class TimePatch(BaseModel):
@@ -66,6 +72,7 @@ class TimerStart(BaseModel):
     work_date: str
     started_at: str
     note: str = ""
+    uid: str | None = None
 
 
 class TimerStop(BaseModel):
@@ -81,6 +88,7 @@ class MileageIn(BaseModel):
     drive_date: str
     miles: float
     note: str = ""
+    uid: str | None = None
 
 
 class MileagePatch(BaseModel):
@@ -93,6 +101,7 @@ class ExpenseIn(BaseModel):
     expense_date: str
     amount: float
     note: str
+    uid: str | None = None
 
 
 class ExpensePatch(BaseModel):
@@ -104,6 +113,7 @@ class ExpensePatch(BaseModel):
 class TaskIn(BaseModel):
     task_date: str
     title: str
+    uid: str | None = None
 
 
 class TaskPatch(BaseModel):
@@ -118,6 +128,13 @@ class PayoutIn(BaseModel):
     period_end: str
     paid_on: str
     note: str = ""
+    uid: str | None = None
+
+
+class RestoreIn(BaseModel):
+    format: str
+    version: int
+    tables: dict[str, list[dict]]
 
 
 def resolve_today(today: str | None) -> date:
@@ -159,6 +176,28 @@ def clean_name(value: str) -> str:
     if len(name) > 80:
         raise HTTPException(status_code=400, detail="That name is a bit long")
     return name
+
+
+UID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def take_uid(value: str | None) -> str:
+    """Use the caller's id when given so a retried write is not a second row."""
+    uid = (value or "").strip()
+    if not uid:
+        return uuid4().hex
+    if not UID_RE.match(uid):
+        raise HTTPException(status_code=400, detail="That id doesn't look right")
+    return uid
+
+
+def resolve_row(conn: sqlite3.Connection, table: str, key: str) -> sqlite3.Row | None:
+    """Look a row up by numeric id or by client uid."""
+    if key.isdigit():
+        row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (int(key),)).fetchone()
+        if row is not None:
+            return row
+    return conn.execute(f"SELECT * FROM {table} WHERE uid = ?", (key,)).fetchone()
 
 
 def check_rate(value: float) -> float:
@@ -217,6 +256,7 @@ def payout_out(row: dict | None) -> dict | None:
         return None
     return {
         "id": row["id"],
+        "uid": row["uid"],
         "kind": row["kind"],
         "period_start": row["period_start"],
         "period_end": row["period_end"],
@@ -230,6 +270,7 @@ def time_out(row: dict) -> dict:
     hours = row["hours"]
     return {
         "id": row["id"],
+        "uid": row["uid"],
         "date": row["work_date"],
         "hours": hours,
         "rate": row["rate"],
@@ -244,6 +285,7 @@ def time_out(row: dict) -> dict:
 def mile_out(row: dict) -> dict:
     return {
         "id": row["id"],
+        "uid": row["uid"],
         "date": row["drive_date"],
         "miles": row["miles"],
         "rate": row["rate"],
@@ -255,6 +297,7 @@ def mile_out(row: dict) -> dict:
 def expense_out(row: dict) -> dict:
     return {
         "id": row["id"],
+        "uid": row["uid"],
         "date": row["expense_date"],
         "amount": row["amount"],
         "note": row["note"],
@@ -264,6 +307,7 @@ def expense_out(row: dict) -> dict:
 def task_out(row: dict) -> dict:
     return {
         "id": row["id"],
+        "uid": row["uid"],
         "date": row["task_date"],
         "title": row["title"],
         "done": bool(row["done"]),
@@ -277,6 +321,7 @@ def running_out(row: dict | None) -> dict | None:
         return None
     return {
         "id": row["id"],
+        "uid": row["uid"],
         "date": row["work_date"],
         "started_at": row["started_at"],
         "created_at": row["created_at"],
@@ -463,9 +508,66 @@ def filename(start: date, end: date, ext: str) -> str:
     return f"assist-{start.isoformat()}-to-{end.isoformat()}.{ext}"
 
 
+SNAPSHOT_TABLES = (
+    "settings",
+    "time_entries",
+    "mileage_entries",
+    "expense_entries",
+    "tasks",
+    "payouts",
+)
+
+
 @app.get("/api/health")
 def health():
     get_db()
+    return {"ok": True}
+
+
+@app.get("/api/backup.json")
+def backup_json():
+    with get_db().transaction() as conn:
+        tables = {
+            table: [dict(row) for row in conn.execute(f"SELECT * FROM {table}")]
+            for table in SNAPSHOT_TABLES
+        }
+    return {
+        "format": "assist-backup",
+        "version": SCHEMA_VERSION,
+        "exported_at": now_iso(),
+        "tables": tables,
+    }
+
+
+@app.post("/api/restore")
+def restore(body: RestoreIn):
+    if body.format != "assist-backup":
+        raise HTTPException(status_code=400, detail="That isn't an assist backup")
+    if body.version != SCHEMA_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail="That backup was made by a different version of assist",
+        )
+    unknown = set(body.tables) - set(SNAPSHOT_TABLES)
+    if unknown:
+        raise HTTPException(status_code=400, detail="That backup has unknown tables")
+    with get_db().transaction() as conn:
+        columns = {
+            table: [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+            for table in SNAPSHOT_TABLES
+        }
+        for table in SNAPSHOT_TABLES:
+            conn.execute(f"DELETE FROM {table}")
+        for table in SNAPSHOT_TABLES:
+            for row in body.tables.get(table, []):
+                keys = [key for key in row if key in columns[table]]
+                if not keys:
+                    continue
+                placeholders = ", ".join("?" for _ in keys)
+                conn.execute(
+                    f"INSERT INTO {table} ({', '.join(keys)}) VALUES ({placeholders})",
+                    [row[key] for key in keys],
+                )
     return {"ok": True}
 
 
@@ -597,15 +699,19 @@ def create_time(body: TimeIn):
     check_past(work_date)
     hours = check_hours(body.hours)
     note = clean_note(body.note)
+    uid = take_uid(body.uid)
     with get_db().transaction() as conn:
+        existing = conn.execute("SELECT * FROM time_entries WHERE uid = ?", (uid,)).fetchone()
+        if existing:
+            return time_out(dict(existing))
         settings = dict(ensure_settings(conn, date.today()))
         stamp = now_iso()
         cur = conn.execute(
             """
-            INSERT INTO time_entries (work_date, hours, rate, note, started_at, ended_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)
+            INSERT INTO time_entries (work_date, hours, rate, note, started_at, ended_at, created_at, updated_at, uid)
+            VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?)
             """,
-            (work_date.isoformat(), hours, settings["hourly_rate"], note, stamp, stamp),
+            (work_date.isoformat(), hours, settings["hourly_rate"], note, stamp, stamp, uid),
         )
         row = dict(conn.execute("SELECT * FROM time_entries WHERE id = ?", (cur.lastrowid,)).fetchone())
     return time_out(row)
@@ -639,9 +745,9 @@ def adjust_timer(body: TimerAdjust):
 
 
 @app.patch("/api/time/{entry_id}")
-def patch_time(entry_id: int, body: TimePatch):
+def patch_time(entry_id: str, body: TimePatch):
     with get_db().transaction() as conn:
-        row = conn.execute("SELECT * FROM time_entries WHERE id = ?", (entry_id,)).fetchone()
+        row = resolve_row(conn, "time_entries", entry_id)
         if row is None:
             raise HTTPException(status_code=404, detail="That entry isn't there anymore")
         current = dict(row)
@@ -657,18 +763,18 @@ def patch_time(entry_id: int, body: TimePatch):
         note = current["note"] if body.note is None else clean_note(body.note)
         conn.execute(
             "UPDATE time_entries SET work_date = ?, hours = ?, note = ?, updated_at = ? WHERE id = ?",
-            (work_date, hours, note, now_iso(), entry_id),
+            (work_date, hours, note, now_iso(), current["id"]),
         )
-        updated = dict(conn.execute("SELECT * FROM time_entries WHERE id = ?", (entry_id,)).fetchone())
+        updated = dict(conn.execute("SELECT * FROM time_entries WHERE id = ?", (current["id"],)).fetchone())
     return time_out(updated)
 
 
 @app.delete("/api/time/{entry_id}")
-def delete_time(entry_id: int):
+def delete_time(entry_id: str):
     with get_db().transaction() as conn:
-        cur = conn.execute("DELETE FROM time_entries WHERE id = ?", (entry_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="That entry isn't there anymore")
+        row = resolve_row(conn, "time_entries", entry_id)
+        if row is not None:
+            conn.execute("DELETE FROM time_entries WHERE id = ?", (row["id"],))
     return {"ok": True}
 
 
@@ -679,7 +785,13 @@ def start_timer(body: TimerStart):
     check_past(work_date)
     started = parse_dt(body.started_at)
     note = clean_note(body.note)
+    uid = take_uid(body.uid)
     with get_db().transaction() as conn:
+        mine = conn.execute(
+            "SELECT * FROM time_entries WHERE uid = ? AND hours IS NULL", (uid,)
+        ).fetchone()
+        if mine:
+            return running_out(dict(mine))
         existing = conn.execute("SELECT id FROM time_entries WHERE hours IS NULL").fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="A timer is already running")
@@ -687,10 +799,10 @@ def start_timer(body: TimerStart):
         stamp = now_iso()
         cur = conn.execute(
             """
-            INSERT INTO time_entries (work_date, hours, rate, note, started_at, ended_at, created_at, updated_at)
-            VALUES (?, NULL, ?, ?, ?, NULL, ?, ?)
+            INSERT INTO time_entries (work_date, hours, rate, note, started_at, ended_at, created_at, updated_at, uid)
+            VALUES (?, NULL, ?, ?, ?, NULL, ?, ?, ?)
             """,
-            (work_date.isoformat(), settings["hourly_rate"], note, started.isoformat(), stamp, stamp),
+            (work_date.isoformat(), settings["hourly_rate"], note, started.isoformat(), stamp, stamp, uid),
         )
         row = dict(conn.execute("SELECT * FROM time_entries WHERE id = ?", (cur.lastrowid,)).fetchone())
     return running_out(row)
@@ -705,7 +817,8 @@ def stop_timer(body: TimerStop):
     with get_db().transaction() as conn:
         row = conn.execute("SELECT * FROM time_entries WHERE hours IS NULL ORDER BY id DESC LIMIT 1").fetchone()
         if row is None:
-            raise HTTPException(status_code=404, detail="No timer is running")
+            # Already stopped (or a retried request): treat as done, not an error.
+            return {"discarded": False, "entry": None}
         current = dict(row)
         started = parse_dt(current["started_at"])
         if ended < started:
@@ -737,24 +850,28 @@ def create_mileage(body: MileageIn):
     check_past(drive_date)
     miles = check_miles(body.miles)
     note = clean_note(body.note)
+    uid = take_uid(body.uid)
     with get_db().transaction() as conn:
+        existing = conn.execute("SELECT * FROM mileage_entries WHERE uid = ?", (uid,)).fetchone()
+        if existing:
+            return mile_out(dict(existing))
         settings = dict(ensure_settings(conn, date.today()))
         stamp = now_iso()
         cur = conn.execute(
             """
-            INSERT INTO mileage_entries (drive_date, miles, rate, note, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO mileage_entries (drive_date, miles, rate, note, created_at, updated_at, uid)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (drive_date.isoformat(), miles, settings["mileage_rate"], note, stamp, stamp),
+            (drive_date.isoformat(), miles, settings["mileage_rate"], note, stamp, stamp, uid),
         )
         row = dict(conn.execute("SELECT * FROM mileage_entries WHERE id = ?", (cur.lastrowid,)).fetchone())
     return mile_out(row)
 
 
 @app.patch("/api/mileage/{entry_id}")
-def patch_mileage(entry_id: int, body: MileagePatch):
+def patch_mileage(entry_id: str, body: MileagePatch):
     with get_db().transaction() as conn:
-        row = conn.execute("SELECT * FROM mileage_entries WHERE id = ?", (entry_id,)).fetchone()
+        row = resolve_row(conn, "mileage_entries", entry_id)
         if row is None:
             raise HTTPException(status_code=404, detail="That drive isn't there anymore")
         current = dict(row)
@@ -768,18 +885,18 @@ def patch_mileage(entry_id: int, body: MileagePatch):
         note = current["note"] if body.note is None else clean_note(body.note)
         conn.execute(
             "UPDATE mileage_entries SET drive_date = ?, miles = ?, note = ?, updated_at = ? WHERE id = ?",
-            (drive_date, miles, note, now_iso(), entry_id),
+            (drive_date, miles, note, now_iso(), current["id"]),
         )
-        updated = dict(conn.execute("SELECT * FROM mileage_entries WHERE id = ?", (entry_id,)).fetchone())
+        updated = dict(conn.execute("SELECT * FROM mileage_entries WHERE id = ?", (current["id"],)).fetchone())
     return mile_out(updated)
 
 
 @app.delete("/api/mileage/{entry_id}")
-def delete_mileage(entry_id: int):
+def delete_mileage(entry_id: str):
     with get_db().transaction() as conn:
-        cur = conn.execute("DELETE FROM mileage_entries WHERE id = ?", (entry_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="That drive isn't there anymore")
+        row = resolve_row(conn, "mileage_entries", entry_id)
+        if row is not None:
+            conn.execute("DELETE FROM mileage_entries WHERE id = ?", (row["id"],))
     return {"ok": True}
 
 
@@ -790,23 +907,27 @@ def create_expense(body: ExpenseIn):
     check_past(expense_date)
     amount = check_amount(body.amount)
     note = clean_expense_note(body.note)
+    uid = take_uid(body.uid)
     with get_db().transaction() as conn:
+        existing = conn.execute("SELECT * FROM expense_entries WHERE uid = ?", (uid,)).fetchone()
+        if existing:
+            return expense_out(dict(existing))
         stamp = now_iso()
         cur = conn.execute(
             """
-            INSERT INTO expense_entries (expense_date, amount, note, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO expense_entries (expense_date, amount, note, created_at, updated_at, uid)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (expense_date.isoformat(), amount, note, stamp, stamp),
+            (expense_date.isoformat(), amount, note, stamp, stamp, uid),
         )
         row = dict(conn.execute("SELECT * FROM expense_entries WHERE id = ?", (cur.lastrowid,)).fetchone())
     return expense_out(row)
 
 
 @app.patch("/api/expenses/{entry_id}")
-def patch_expense(entry_id: int, body: ExpensePatch):
+def patch_expense(entry_id: str, body: ExpensePatch):
     with get_db().transaction() as conn:
-        row = conn.execute("SELECT * FROM expense_entries WHERE id = ?", (entry_id,)).fetchone()
+        row = resolve_row(conn, "expense_entries", entry_id)
         if row is None:
             raise HTTPException(status_code=404, detail="That expense isn't there anymore")
         current = dict(row)
@@ -820,18 +941,18 @@ def patch_expense(entry_id: int, body: ExpensePatch):
         note = current["note"] if body.note is None else clean_expense_note(body.note)
         conn.execute(
             "UPDATE expense_entries SET expense_date = ?, amount = ?, note = ?, updated_at = ? WHERE id = ?",
-            (expense_date, amount, note, now_iso(), entry_id),
+            (expense_date, amount, note, now_iso(), current["id"]),
         )
-        updated = dict(conn.execute("SELECT * FROM expense_entries WHERE id = ?", (entry_id,)).fetchone())
+        updated = dict(conn.execute("SELECT * FROM expense_entries WHERE id = ?", (current["id"],)).fetchone())
     return expense_out(updated)
 
 
 @app.delete("/api/expenses/{entry_id}")
-def delete_expense(entry_id: int):
+def delete_expense(entry_id: str):
     with get_db().transaction() as conn:
-        cur = conn.execute("DELETE FROM expense_entries WHERE id = ?", (entry_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="That expense isn't there anymore")
+        row = resolve_row(conn, "expense_entries", entry_id)
+        if row is not None:
+            conn.execute("DELETE FROM expense_entries WHERE id = ?", (row["id"],))
     return {"ok": True}
 
 
@@ -851,7 +972,11 @@ def create_task(body: TaskIn):
     task_date = parse_day(body.task_date)
     check_sane(task_date)
     title = clean_title(body.title)
+    uid = take_uid(body.uid)
     with get_db().transaction() as conn:
+        existing = conn.execute("SELECT * FROM tasks WHERE uid = ?", (uid,)).fetchone()
+        if existing:
+            return task_out(dict(existing))
         current = conn.execute(
             "SELECT COALESCE(MAX(sort_order), 0) FROM tasks WHERE task_date = ?",
             (task_date.isoformat(),),
@@ -859,19 +984,19 @@ def create_task(body: TaskIn):
         stamp = now_iso()
         cur = conn.execute(
             """
-            INSERT INTO tasks (task_date, title, done, done_at, sort_order, created_at, updated_at)
-            VALUES (?, ?, 0, NULL, ?, ?, ?)
+            INSERT INTO tasks (task_date, title, done, done_at, sort_order, created_at, updated_at, uid)
+            VALUES (?, ?, 0, NULL, ?, ?, ?, ?)
             """,
-            (task_date.isoformat(), title, current + 1, stamp, stamp),
+            (task_date.isoformat(), title, current + 1, stamp, stamp, uid),
         )
         row = dict(conn.execute("SELECT * FROM tasks WHERE id = ?", (cur.lastrowid,)).fetchone())
     return task_out(row)
 
 
 @app.patch("/api/tasks/{task_id}")
-def patch_task(task_id: int, body: TaskPatch):
+def patch_task(task_id: str, body: TaskPatch):
     with get_db().transaction() as conn:
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = resolve_row(conn, "tasks", task_id)
         if row is None:
             raise HTTPException(status_code=404, detail="That task isn't there anymore")
         current = dict(row)
@@ -891,18 +1016,18 @@ def patch_task(task_id: int, body: TaskPatch):
             SET task_date = ?, title = ?, done = ?, done_at = ?, updated_at = ?
             WHERE id = ?
             """,
-            (task_date, title, done, done_at, now_iso(), task_id),
+            (task_date, title, done, done_at, now_iso(), current["id"]),
         )
-        updated = dict(conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
+        updated = dict(conn.execute("SELECT * FROM tasks WHERE id = ?", (current["id"],)).fetchone())
     return task_out(updated)
 
 
 @app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: int):
+def delete_task(task_id: str):
     with get_db().transaction() as conn:
-        cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="That task isn't there anymore")
+        row = resolve_row(conn, "tasks", task_id)
+        if row is not None:
+            conn.execute("DELETE FROM tasks WHERE id = ?", (row["id"],))
     return {"ok": True}
 
 
@@ -955,15 +1080,15 @@ def create_payout(body: PayoutIn):
                 amount = sum_amounts(row["amount"] for row in rows)
             cur = conn.execute(
                 """
-                INSERT INTO payouts (kind, period_start, period_end, amount, paid_on, note, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO payouts (kind, period_start, period_end, amount, paid_on, note, created_at, uid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (kind, start.isoformat(), end.isoformat(), amount, paid_on.isoformat(), note, now_iso()),
+                (kind, start.isoformat(), end.isoformat(), amount, paid_on.isoformat(), note, now_iso(), uuid4().hex),
             )
             row = dict(conn.execute("SELECT * FROM payouts WHERE id = ?", (cur.lastrowid,)).fetchone())
             saved[kind] = payout_out(row)
             created += 1
-    if created == 0:
+    if created == 0 and body.uid is None:
         raise HTTPException(status_code=409, detail="This period is already marked paid")
     if body.kind == "both":
         return saved
@@ -971,11 +1096,11 @@ def create_payout(body: PayoutIn):
 
 
 @app.delete("/api/payouts/{payout_id}")
-def delete_payout(payout_id: int):
+def delete_payout(payout_id: str):
     with get_db().transaction() as conn:
-        cur = conn.execute("DELETE FROM payouts WHERE id = ?", (payout_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="That payout isn't there anymore")
+        row = resolve_row(conn, "payouts", payout_id)
+        if row is not None:
+            conn.execute("DELETE FROM payouts WHERE id = ?", (row["id"],))
     return {"ok": True}
 
 
@@ -1064,6 +1189,27 @@ def dashboard(today: str | None = None, start: str | None = None, end: str | Non
             "expense_entries": report["expense_entries"],
             "series": series,
         },
+    }
+
+
+@app.get("/api/sync")
+def sync(today: str | None = None):
+    day = resolve_today(today)
+    with get_db().transaction() as conn:
+        settings = dict(ensure_settings(conn, day))
+        time_rows, mile_rows, payout_rows, task_rows, expense_rows = load_logs(conn)
+        running = conn.execute(
+            "SELECT * FROM time_entries WHERE hours IS NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    return {
+        "server_time": now_iso(),
+        "settings": settings_out(settings),
+        "time_entries": [time_out(row) for row in time_rows],
+        "mileage_entries": [mile_out(row) for row in mile_rows],
+        "expense_entries": [expense_out(row) for row in expense_rows],
+        "tasks": [task_out(row) for row in task_rows],
+        "payouts": [payout_out(row) for row in payout_rows],
+        "running": running_out(dict(running) if running else None),
     }
 
 

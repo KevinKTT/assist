@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { Sheet, useApp } from '../app-context'
 import { IconDays } from '../icons'
+import { newUid } from '../uid'
 import { addDays, formatMonth, formatWeek, localDate, parseISODate, sundayOnOrBefore, weekday, weekdayShort } from '../format'
 import type { Task } from '../types'
 
@@ -240,7 +241,7 @@ function TaskSheet({
           body: JSON.stringify({ title, task_date: date }),
         })
       } else {
-        await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title, task_date: date }) })
+        await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title, task_date: date, uid: newUid() }) })
       }
       onDone('Saved')
     } catch (err) {

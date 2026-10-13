@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, downloadFile } from '../api'
 import { Sheet, useApp } from '../app-context'
+import { newUid } from '../uid'
 import { addDays, formatDay, formatPeriod, hoursText, localDate, milesText, money, parseISODate, sundayOnOrBefore } from '../format'
 import type { Dashboard, ExpenseEntry, SeriesPoint } from '../types'
 
@@ -231,6 +232,7 @@ function PaySheet({
           period_end: period.end,
           paid_on: paidOn,
           note,
+          uid: newUid(),
         }),
       })
       onDone('Marked paid')
@@ -331,7 +333,7 @@ function ExpenseForm({
     try {
       const body = { expense_date: day, amount: value, note }
       if (entry) await api(`/api/expenses/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-      else await api('/api/expenses', { method: 'POST', body: JSON.stringify(body) })
+      else await api('/api/expenses', { method: 'POST', body: JSON.stringify({ ...body, uid: newUid() }) })
       onDone('Saved')
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'Could not save')

@@ -41,6 +41,53 @@ ASSIST_DATA=/srv/assist docker compose up -d
 
 Chrome can install it on a phone once this is reached over HTTPS.
 
+## Backups
+
+assist snapshots its database on startup and hourly, into `./backups` on the
+host (override with `ASSIST_BACKUPS`). It keeps the newest snapshot for each of
+the last 24 hours, then one per day for the last 7 days.
+
+The snapshot is a complete, consistent copy of the SQLite database, so restoring
+is just dropping it back in as `data/assist.db`. There is also a JSON dump and
+restore:
+
+- `GET /api/backup.json` — every record as JSON.
+- `POST /api/restore` — replace everything from a dump produced above.
+
+If the database file goes missing or comes up empty while a data directory has
+been used before, the app refuses to start rather than silently creating a blank
+database.
+
+### Off-host copies to Seafile
+
+Set these to also push each snapshot to a Seafile library (via the Web API, no
+sync client needed). Leave them unset to keep backups local only.
+
+```bash
+SEAFILE_URL=https://seafile.example.com \
+SEAFILE_TOKEN=your-api-token \
+SEAFILE_REPO_ID=the-library-id \
+SEAFILE_DIR=/assist-backups \
+docker compose up -d
+```
+
+Snapshots are uploaded under timestamped names and the remote keeps the newest
+30, so a bad snapshot can never overwrite a good one. If Seafile is unreachable,
+the upload is logged and retried on the next cycle; the app is unaffected.
+
+## Surviving network hiccups
+
+Every record has a stable `uid`. When the app creates something it sends that
+`uid`, and the server treats the same `uid` as the same record, so a request that
+is retried after a dropped connection can never create a duplicate. Edits and
+deletes are idempotent too — deleting something that is already gone is not an
+error. The web client retries failed requests a couple of times with backoff, so
+a brief blip is usually invisible.
+
+`GET /api/sync` returns the full state (settings, entries, tasks, payouts, and
+any running timer) with each record's `uid` and `updated_at`, which is what the
+client uses to reconcile.
+
 ## Tests
 
 ```bash

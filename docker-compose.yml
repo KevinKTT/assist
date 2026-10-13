@@ -10,8 +10,15 @@ services:
       - "${ASSIST_PORT:-8080}:8080"
     environment:
       ASSIST_DATA_DIR: /data
+      ASSIST_BACKUP_DIR: /backups
+      # Optional off-host copies. Leave blank to keep backups local only.
+      SEAFILE_URL: ${SEAFILE_URL:-}
+      SEAFILE_TOKEN: ${SEAFILE_TOKEN:-}
+      SEAFILE_REPO_ID: ${SEAFILE_REPO_ID:-}
+      SEAFILE_DIR: ${SEAFILE_DIR:-/assist-backups}
     volumes:
       - ${ASSIST_DATA:-./data}:/data
+      - ${ASSIST_BACKUPS:-./backups}:/backups
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health')"]

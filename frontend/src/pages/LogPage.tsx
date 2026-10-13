@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { Sheet, useApp } from '../app-context'
+import { newUid } from '../uid'
 import { clock, clockFace, dayNumber, formatDay, formatPeriod, hoursText, localDate, milesText, money, rateText, splitHours, weekday, weekdayShort } from '../format'
 import type { ExpenseEntry, HistoryMonth, HistoryPeriod, Kind, MileageEntry, PeriodDay, PeriodDetail, Running, Settings, TimeEntry } from '../types'
 
@@ -95,7 +96,7 @@ function LogPage({ kind }: { kind: Kind }) {
     try {
       setRunning(await api<Running>('/api/time/start', {
         method: 'POST',
-        body: JSON.stringify({ work_date: today, started_at: new Date().toISOString() }),
+        body: JSON.stringify({ work_date: today, started_at: new Date().toISOString(), uid: newUid() }),
       }))
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not start')
@@ -741,15 +742,15 @@ function LogForm({
       if (kind === 'hours') {
         const body = { work_date: day, hours: value, note }
         if (entry) await api(`/api/time/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-        else await api('/api/time', { method: 'POST', body: JSON.stringify(body) })
+        else await api('/api/time', { method: 'POST', body: JSON.stringify({ ...body, uid: newUid() }) })
       } else if (kind === 'expenses') {
         const body = { expense_date: day, amount: value, note }
         if (entry) await api(`/api/expenses/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-        else await api('/api/expenses', { method: 'POST', body: JSON.stringify(body) })
+        else await api('/api/expenses', { method: 'POST', body: JSON.stringify({ ...body, uid: newUid() }) })
       } else {
         const body = { drive_date: day, miles: value, note }
         if (entry) await api(`/api/mileage/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-        else await api('/api/mileage', { method: 'POST', body: JSON.stringify(body) })
+        else await api('/api/mileage', { method: 'POST', body: JSON.stringify({ ...body, uid: newUid() }) })
       }
       onDone('Saved')
     } catch (err) {
