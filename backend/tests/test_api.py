@@ -19,7 +19,7 @@ def test_pay_miles_tasks_and_exports(tmp_path):
         today = "2026-03-10"
         settings = client.get("/api/settings", params={"today": today}).json()
         settings.update({
-            "display_name": "Katie",
+            "display_name": "Test User",
             "hourly_rate": 20,
             "mileage_rate": 0.7,
             "cycle": "biweekly",
@@ -131,7 +131,7 @@ def test_expenses_roll_into_pay_and_exports(tmp_path):
     with make_client(tmp_path) as client:
         today = "2026-03-10"
         client.put("/api/settings", params={"today": today}, json={
-            "display_name": "Katie",
+            "display_name": "Test User",
             "hourly_rate": 20,
             "mileage_rate": 0.7,
             "cycle": "biweekly",

@@ -141,7 +141,7 @@ def test_backup_and_restore_round_trip(tmp_path):
             "/api/settings",
             params={"today": "2026-03-10"},
             json={
-                "display_name": "Katie",
+                "display_name": "Test User",
                 "hourly_rate": 20,
                 "mileage_rate": 0.7,
                 "cycle": "biweekly",

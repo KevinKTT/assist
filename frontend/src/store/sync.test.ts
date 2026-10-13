@@ -99,14 +99,14 @@ describe('offline outbox', () => {
     void remote
     const snapshot: Snapshot = {
       ...emptySnapshot,
-      settings: { ...emptySnapshot.settings, display_name: 'Katie' },
+      settings: { ...emptySnapshot.settings, display_name: 'Test User' },
       mileage_entries: [
         { id: 1, uid: 'm1', date: '2026-03-02', miles: 5, rate: 0.7, pay: 3.5, note: 'school' },
       ],
     }
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json(snapshot))))
     await sync('2026-03-03')
-    expect((await db.settings.get(1))?.display_name).toBe('Katie')
+    expect((await db.settings.get(1))?.display_name).toBe('Test User')
     expect(await db.mileage_entries.count()).toBe(1)
     expect(await db.outbox.count()).toBe(0)
   })

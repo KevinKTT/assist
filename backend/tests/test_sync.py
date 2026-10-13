@@ -81,7 +81,7 @@ def test_sync_returns_all_state(tmp_path):
         client.put(
             "/api/settings",
             json={
-                "display_name": "Katie",
+                "display_name": "Test User",
                 "hourly_rate": 20,
                 "mileage_rate": 0.7,
                 "cycle": "weekly",
@@ -91,7 +91,7 @@ def test_sync_returns_all_state(tmp_path):
         )
         client.post("/api/time", json={"work_date": "2026-03-10", "hours": 8, "uid": "sync-0001"})
         state = client.get("/api/sync").json()
-        assert state["settings"]["display_name"] == "Katie"
+        assert state["settings"]["display_name"] == "Test User"
         assert state["server_time"]
         assert state["running"] is None
         assert len(state["time_entries"]) == 1

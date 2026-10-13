@@ -28,7 +28,7 @@ def build():
         "/api/settings",
         params={"today": TODAY},
         json={
-            "display_name": "Katie",
+            "display_name": "Test User",
             "hourly_rate": 20,
             "mileage_rate": 0.7,
             "cycle": "biweekly",

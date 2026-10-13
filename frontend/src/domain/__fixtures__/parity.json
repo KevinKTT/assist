@@ -15,7 +15,7 @@
           "paid_on": "2026-03-20",
           "period_end": "2026-03-15",
           "period_start": "2026-03-02",
-          "uid": "f2b43beac4e3493e90a6fd8da056c4be"
+          "uid": "7655ee37f596483cb35d09fad282043c"
         },
         "hours": 9.0,
         "hours_pay": 180.0,
@@ -27,7 +27,7 @@
           "paid_on": "2026-03-20",
           "period_end": "2026-03-15",
           "period_start": "2026-03-02",
-          "uid": "339b7c7634e24c3780579003a48c6e31"
+          "uid": "bcf1f693b29644b7888ab84a7371281a"
         },
         "mileage_pay": 7.0,
         "mileage_payout": {
@@ -38,7 +38,7 @@
           "paid_on": "2026-03-20",
           "period_end": "2026-03-15",
           "period_start": "2026-03-02",
-          "uid": "fd925ea02f894ffdba99e6b39a737901"
+          "uid": "50d30f82a08b4023ad18cb2dd3794ed3"
         },
         "miles": 10.0,
         "payday": "2026-03-20",
@@ -53,7 +53,7 @@
             "date": "2026-03-03",
             "id": 1,
             "note": "Uber back",
-            "uid": "34c472bbae584fed98fda634aa2d074d"
+            "uid": "b74888fbb9e547daa4792abc7fa53884"
           }
         ],
         "expenses": 18.4,
@@ -168,7 +168,7 @@
               "paid_on": "2026-03-20",
               "period_end": "2026-03-15",
               "period_start": "2026-03-02",
-              "uid": "f2b43beac4e3493e90a6fd8da056c4be"
+              "uid": "7655ee37f596483cb35d09fad282043c"
             },
             "hours": 9.0,
             "hours_pay": 180.0,
@@ -180,7 +180,7 @@
               "paid_on": "2026-03-20",
               "period_end": "2026-03-15",
               "period_start": "2026-03-02",
-              "uid": "339b7c7634e24c3780579003a48c6e31"
+              "uid": "bcf1f693b29644b7888ab84a7371281a"
             },
             "is_current": true,
             "mileage_pay": 7.0,
@@ -192,7 +192,7 @@
               "paid_on": "2026-03-20",
               "period_end": "2026-03-15",
               "period_start": "2026-03-02",
-              "uid": "fd925ea02f894ffdba99e6b39a737901"
+              "uid": "50d30f82a08b4023ad18cb2dd3794ed3"
             },
             "miles": 10.0,
             "mixed_hour_rates": false,
@@ -328,7 +328,7 @@
               "date": "2026-03-03",
               "id": 1,
               "note": "Uber back",
-              "uid": "34c472bbae584fed98fda634aa2d074d"
+              "uid": "b74888fbb9e547daa4792abc7fa53884"
             }
           ],
           "expenses": 18.4,
@@ -342,7 +342,7 @@
               "note": "school",
               "pay": 7.0,
               "rate": 0.7,
-              "uid": "a3f5230e5d8043c89881238dc1d689b2"
+              "uid": "394aa2fb71d44d55b00e5d730a81ba31"
             }
           ],
           "mileage_pay": 7.0,
@@ -358,7 +358,7 @@
               "rate": 20.0,
               "source": "manual",
               "started_at": null,
-              "uid": "a340f6f767114df0bf2bc634ebc26aa9"
+              "uid": "aae3e23d50ec4dd49ea69e5d83e0375c"
             }
           ]
         },
@@ -382,7 +382,7 @@
               "rate": 20.0,
               "source": "manual",
               "started_at": null,
-              "uid": "8bb70aece58545f5ba9e55d5f5dc59ee"
+              "uid": "79ae8a52a063426eb2243a5cda70f314"
             }
           ]
         },
@@ -518,7 +518,7 @@
         "paid_on": "2026-03-20",
         "period_end": "2026-03-15",
         "period_start": "2026-03-02",
-        "uid": "f2b43beac4e3493e90a6fd8da056c4be"
+        "uid": "7655ee37f596483cb35d09fad282043c"
       },
       "hours": 9.0,
       "hours_pay": 180.0,
@@ -530,7 +530,7 @@
         "paid_on": "2026-03-20",
         "period_end": "2026-03-15",
         "period_start": "2026-03-02",
-        "uid": "339b7c7634e24c3780579003a48c6e31"
+        "uid": "bcf1f693b29644b7888ab84a7371281a"
       },
       "is_current": true,
       "mileage_pay": 7.0,
@@ -542,7 +542,7 @@
         "paid_on": "2026-03-20",
         "period_end": "2026-03-15",
         "period_start": "2026-03-02",
-        "uid": "fd925ea02f894ffdba99e6b39a737901"
+        "uid": "50d30f82a08b4023ad18cb2dd3794ed3"
       },
       "miles": 10.0,
       "mixed_hour_rates": false,
@@ -561,7 +561,7 @@
         "date": "2026-03-03",
         "id": 1,
         "note": "Uber back",
-        "uid": "34c472bbae584fed98fda634aa2d074d"
+        "uid": "b74888fbb9e547daa4792abc7fa53884"
       }
     ],
     "mileage_entries": [
@@ -572,7 +572,7 @@
         "note": "school",
         "pay": 7.0,
         "rate": 0.7,
-        "uid": "a3f5230e5d8043c89881238dc1d689b2"
+        "uid": "394aa2fb71d44d55b00e5d730a81ba31"
       }
     ],
     "payouts": [
@@ -584,7 +584,7 @@
         "paid_on": "2026-03-20",
         "period_end": "2026-03-15",
         "period_start": "2026-03-02",
-        "uid": "339b7c7634e24c3780579003a48c6e31"
+        "uid": "bcf1f693b29644b7888ab84a7371281a"
       },
       {
         "amount": 7.0,
@@ -594,7 +594,7 @@
         "paid_on": "2026-03-20",
         "period_end": "2026-03-15",
         "period_start": "2026-03-02",
-        "uid": "fd925ea02f894ffdba99e6b39a737901"
+        "uid": "50d30f82a08b4023ad18cb2dd3794ed3"
       },
       {
         "amount": 18.4,
@@ -604,15 +604,15 @@
         "paid_on": "2026-03-20",
         "period_end": "2026-03-15",
         "period_start": "2026-03-02",
-        "uid": "f2b43beac4e3493e90a6fd8da056c4be"
+        "uid": "7655ee37f596483cb35d09fad282043c"
       }
     ],
     "running": null,
-    "server_time": "2026-10-13T19:26:32+00:00",
+    "server_time": "2026-10-13T20:04:21+00:00",
     "settings": {
       "cycle": "biweekly",
       "cycle_anchor": "2026-03-02",
-      "display_name": "Katie",
+      "display_name": "Test User",
       "hourly_rate": 20.0,
       "mileage_rate": 0.7,
       "payday_offset_days": 5
@@ -621,11 +621,11 @@
       {
         "date": "2026-03-11",
         "done": true,
-        "done_at": "2026-10-13T19:26:32+00:00",
+        "done_at": "2026-10-13T20:04:21+00:00",
         "id": 1,
         "sort_order": 1,
         "title": "Call school",
-        "uid": "60423160bb7d4050b2053212dff386d0"
+        "uid": "f8eacfb526fb432baf66cdfc301f6d66"
       }
     ],
     "time_entries": [
@@ -639,7 +639,7 @@
         "rate": 20.0,
         "source": "manual",
         "started_at": null,
-        "uid": "a340f6f767114df0bf2bc634ebc26aa9"
+        "uid": "aae3e23d50ec4dd49ea69e5d83e0375c"
       },
       {
         "date": "2026-03-04",
@@ -651,7 +651,7 @@
         "rate": 20.0,
         "source": "manual",
         "started_at": null,
-        "uid": "8bb70aece58545f5ba9e55d5f5dc59ee"
+        "uid": "79ae8a52a063426eb2243a5cda70f314"
       }
     ]
   },
