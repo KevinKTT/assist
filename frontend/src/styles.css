@@ -705,3 +705,103 @@ h2 { font-family: var(--display); font-weight: 600; }
   text-decoration: underline;
   font-weight: 800;
 }
+.entry-times {
+  color: var(--rose-deep);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.clocked-times { margin: 0 0 12px; color: var(--rose-deep); }
+.task-title { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.task-field textarea { min-height: 168px; line-height: 1.5; resize: vertical; }
+
+/* Desktop: same look, real use of the wider screen. A sidebar replaces the
+   bottom tab bar, sheets become centered dialogs, and the To Do week is a
+   true 7-column planner filling the available width. */
+@media (min-width: 1024px) {
+  .app {
+    width: min(1280px, 100%);
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1fr);
+    grid-template-areas:
+      "header header"
+      "banner banner"
+      "nav main";
+    column-gap: 28px;
+    padding: 0 28px;
+  }
+  .app > .top { grid-area: header; padding-left: 0; padding-right: 0; }
+  .app > .syncbar { grid-area: banner; }
+  .app > .screen { grid-area: main; padding: 8px 0 48px; min-width: 0; }
+  .tabbar {
+    grid-area: nav;
+    position: sticky;
+    top: 24px;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    width: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: transparent;
+    backdrop-filter: none;
+    border-top: 0;
+    padding: 12px 0;
+    align-self: start;
+  }
+  .tab {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 10px;
+    font-size: 15px;
+    padding: 10px 12px;
+    border-radius: 999px;
+  }
+  .tab.active { background: var(--blush-soft); }
+  .tab.active .ico { background: var(--blush); }
+  .screen.has-fab { padding-bottom: 48px; }
+  .fab {
+    left: auto;
+    right: 36px;
+    bottom: 36px;
+    transform: none;
+    width: auto;
+    padding-right: 0;
+  }
+  .sheet {
+    left: 50%;
+    top: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    width: min(600px, calc(100% - 48px));
+    border-radius: 28px;
+    max-height: min(88dvh, 820px);
+  }
+  .toast { bottom: 24px; }
+  .planner {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+  }
+  .plan-day {
+    display: block;
+    background: rgba(255, 252, 248, 0.72);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 12px;
+    min-height: 180px;
+  }
+  .plan-mark { text-align: left; margin-bottom: 8px; }
+  .stat-grid { grid-template-columns: repeat(4, 1fr); }
+  .pair { grid-template-columns: repeat(3, 1fr); }
+  .segment { max-width: 560px; }
+  .card, .hero { padding: 24px; }
+  h1 { font-size: 40px; }
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .stat-grid { grid-template-columns: repeat(3, 1fr); }
+}

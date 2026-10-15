@@ -58,17 +58,13 @@ function SyncBanner({ sync, onRetry }: { sync: SyncState; onRetry: () => void })
   if (sync.status === 'pending') {
     return (
       <button className="syncbar pending" type="button" onClick={onRetry}>
-        <span>{sync.pending} change{sync.pending === 1 ? '' : 's'} waiting to sync.</span>
+        <span>{sync.message ?? `${sync.pending} change${sync.pending === 1 ? '' : 's'} waiting to sync. It is saved on this device — open it to fix or retry.`}</span>
         <span className="syncbar-action">Sync now</span>
       </button>
     )
   }
-  if (sync.status === 'syncing') {
-    return (
-      <div className="syncbar syncing">
-        <span>Syncing…</span>
-      </div>
-    )
-  }
+  // Background syncs (every 30s, on returning to the app, after a save) are
+  // silent: showing a "Syncing…" banner each time made the screen pulse and
+  // shift. Only offline / waiting / rejected states are surfaced.
   return null
 }

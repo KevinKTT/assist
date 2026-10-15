@@ -92,6 +92,65 @@ describe('offline outbox', () => {
     expect(ops.filter((op) => op.method === 'PATCH')).toHaveLength(1)
   })
 
+  it('keeps a save made while a sync pull is in flight', async () => {
+    let resolvePull: ((res: Response) => void) | null = null
+    let pulls = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).startsWith('/api/sync')) {
+          pulls += 1
+          if (pulls === 1) return new Promise<Response>((resolve) => { resolvePull = resolve })
+          // After the queued POST succeeds the server would return it.
+          return json({ ...emptySnapshot, time_entries: await db.time_entries.toArray() })
+        }
+        return json({ ok: true })
+      }),
+    )
+    const pulling = sync('2026-03-03')
+    // Let sync reach the pending pull before saving.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await createTime({ date: '2026-03-03', hours: 8, note: 'during sync' })
+    expect(await db.time_entries.count()).toBe(1)
+    resolvePull!(json(emptySnapshot))
+    await pulling
+    // The first snapshot did not contain the new entry, but its queued
+    // POST protects it from being wiped, and the same sync then pushes it.
+    expect(await db.time_entries.count()).toBe(1)
+    expect(await db.outbox.count()).toBe(0)
+
+    const created = (await db.time_entries.toArray())[0]
+    const snapshot: Snapshot = { ...emptySnapshot, time_entries: [created] }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(String(input).startsWith('/api/sync') ? json(snapshot) : json({ ok: true })),
+      ),
+    )
+    await sync('2026-03-03')
+    expect(await db.outbox.count()).toBe(0)
+    expect((await db.time_entries.toArray())[0].note).toBe('during sync')
+  })
+
+  it('keeps the local record when the server rejects a write', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(
+          String(input).startsWith('/api/sync')
+            ? json(emptySnapshot)
+            : json({ detail: 'That note is a bit long' }, 400),
+        ),
+      ),
+    )
+    await createTime({ date: '2026-03-03', hours: 8, note: 'x' })
+    await sync('2026-03-03')
+    expect(await db.outbox.count()).toBe(0)
+    expect(getSyncState().message).toBe('That note is a bit long')
+    // Not silently deleted: still visible locally so it can be fixed.
+    expect(await db.time_entries.count()).toBe(1)
+  })
+
   it('replaces local state with the server snapshot after a clean push', async () => {
     const remote = {
       ...emptySnapshot.time_entries,

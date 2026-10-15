@@ -86,6 +86,11 @@ def test_pay_miles_tasks_and_exports(tmp_path):
         empty = client.post("/api/tasks", json={"task_date": "2026-03-12", "title": "   "})
         assert empty.status_code == 400
 
+        paragraph = "First line of a longer task.\nSecond line with more detail. " * 3
+        long_task = client.post("/api/tasks", json={"task_date": "2026-03-12", "title": paragraph})
+        assert long_task.status_code == 200
+        assert long_task.json()["title"] == paragraph.strip()
+
         csv = client.get("/api/export/csv", params={"start": "2026-03-02", "end": "2026-03-15", "today": today})
         assert csv.status_code == 200
         assert "Call school" in csv.text

@@ -73,3 +73,20 @@ export async function getSettings(): Promise<Settings> {
   const row = await db.settings.get(1)
   return row ?? DEFAULT_SETTINGS
 }
+
+const REJECTED_KEY = 'rejected_uids'
+
+export async function getRejectedUids(): Promise<string[]> {
+  const row = await db.meta.get(REJECTED_KEY)
+  return Array.isArray(row?.value) ? (row.value as string[]) : []
+}
+
+export async function addRejectedUid(uid: string): Promise<void> {
+  const current = await getRejectedUids()
+  if (!current.includes(uid)) await db.meta.put({ key: REJECTED_KEY, value: [...current, uid] })
+}
+
+export async function removeRejectedUid(uid: string): Promise<void> {
+  const current = await getRejectedUids()
+  if (current.includes(uid)) await db.meta.put({ key: REJECTED_KEY, value: current.filter((item) => item !== uid) })
+}

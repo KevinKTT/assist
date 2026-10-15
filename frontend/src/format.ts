@@ -112,3 +112,14 @@ export function clockFace(d: Date): string {
   const minute = String(d.getMinutes()).padStart(2, '0')
   return `${hour}:${minute} ${h24 >= 12 ? 'PM' : 'AM'}`
 }
+
+export function clockFaceISO(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : clockFace(d)
+}
+
+export function clockRange(startedAt: string | null, endedAt: string | null): string {
+  if (!startedAt || !endedAt) return ''
+  return `${clockFaceISO(startedAt)} – ${clockFaceISO(endedAt)}`
+}

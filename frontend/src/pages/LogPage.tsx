@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Sheet, useApp } from '../app-context'
-import { clock, clockFace, dayNumber, formatDay, formatPeriod, hoursText, localDate, milesText, money, parseISODate, rateText, splitHours, weekday, weekdayShort } from '../format'
+import { clock, clockFace, clockRange, dayNumber, formatDay, formatPeriod, hoursText, localDate, milesText, money, parseISODate, rateText, splitHours, weekday, weekdayShort } from '../format'
 import { periodContaining } from '../domain/periods'
 import { history, payoutIndex, summarize, withDays } from '../domain/summary'
 import { db, getRunning } from '../store/db'
@@ -525,6 +525,9 @@ function EntryButton({
         <>
           <span>{'hours' in entry ? hoursText(entry.hours) : milesText(entry.miles)}</span>
           {'source' in entry && entry.source === 'timer' && <em>clocked</em>}
+          {'started_at' in entry && entry.started_at && entry.ended_at && (
+            <span className="entry-times">{clockRange(entry.started_at, entry.ended_at)}</span>
+          )}
           {entry.note ? <span className="entry-note">{entry.note}</span> : <span className="entry-note" />}
           {!today && 'pay' in entry && <span className="entry-pay">{money(entry.pay)}</span>}
         </>
@@ -744,12 +747,17 @@ function LogForm({
     }
   }
 
+  const clockedTimes = entry && 'started_at' in entry ? clockRange(entry.started_at, entry.ended_at) : ''
+
   return (
     <form onSubmit={save}>
       <label className="field">
         <span>Day</span>
         <input type="date" value={day} max={today} onChange={(e) => setDay(e.target.value)} required />
       </label>
+      {clockedTimes && (
+        <p className="help clocked-times">Clocked in – out: {clockedTimes}</p>
+      )}
       {kind === 'hours' ? (
         <div className="hm">
           <label className="field">

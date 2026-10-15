@@ -181,16 +181,17 @@ def check_past(day: date) -> None:
 
 def clean_note(value: str) -> str:
     note = " ".join(value.split())
-    if len(note) > 280:
+    if len(note) > 2000:
         raise HTTPException(status_code=400, detail="That note is a bit long")
     return note
 
 
 def clean_title(value: str) -> str:
-    title = " ".join(value.split())
+    # Tasks can be a whole paragraph: keep line breaks, only trim the ends.
+    title = value.replace("\r\n", "\n").replace("\r", "\n").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Add a task first")
-    if len(title) > 120:
+    if len(title) > 2000:
         raise HTTPException(status_code=400, detail="That task is a bit long")
     return title
 

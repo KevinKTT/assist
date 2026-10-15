@@ -216,6 +216,10 @@ function TaskSheet({
       setProblem('Add a task first')
       return
     }
+    if (title.trim().length > 2000) {
+      setProblem('That task is a bit long')
+      return
+    }
     setBusy(true)
     try {
       if (sheet?.task) {
@@ -258,9 +262,16 @@ function TaskSheet({
             </button>
           ))}
         </div>
-        <label className="field">
+        <label className="field task-field">
           <span>{weekday(date)}</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What needs doing?" autoFocus />
+          <textarea
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="What needs doing? Write as much as you need…"
+            autoFocus
+            rows={6}
+            maxLength={2000}
+          />
         </label>
         {problem && <p className="mismatch">{problem}</p>}
         <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
