@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Sheet, useApp } from '../app-context'
 import { IconDays } from '../icons'
-import { addDays, formatMonth, formatWeek, localDate, parseISODate, sundayOnOrBefore, weekday, weekdayShort } from '../format'
+import { addDays, formatDay, formatMonth, formatWeek, localDate, parseISODate, sundayOnOrBefore, weekday, weekdayShort } from '../format'
 import { db } from '../store/db'
 import { createTask, deleteTask, updateTask } from '../store/repository'
 import type { Task } from '../types'
@@ -13,11 +13,45 @@ export function DaysPage() {
   const [calOpen, setCalOpen] = useState(false)
   const [cursor, setCursor] = useState(() => new Date())
   const [sheet, setSheet] = useState<{ date: string; task?: Task } | null>(null)
+  const [selected, setSelected] = useState(today)
+  const [quickTitle, setQuickTitle] = useState('')
+  const [quickProblem, setQuickProblem] = useState('')
+  const [quickBusy, setQuickBusy] = useState(false)
   const start = useRef<{ x: number; y: number } | null>(null)
   const tasks = useLiveQuery(() => db.tasks.toArray(), [], [] as Task[])
   const weekIso = localDate(weekStart)
   const days = Array.from({ length: 7 }, (_, i) => localDate(addDays(weekStart, i)))
   const thisWeek = localDate(sundayOnOrBefore(parseISODate(today))) === weekIso
+
+  // Desktop agenda shows one day at a time; keep the selection inside the
+  // displayed week when navigating.
+  useEffect(() => {
+    if (!days.includes(selected)) setSelected(days.includes(today) ? today : days[0])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekIso])
+
+  async function quickAdd(event: React.FormEvent) {
+    event.preventDefault()
+    if (!quickTitle.trim()) {
+      setQuickProblem('Add a task first')
+      return
+    }
+    if (quickTitle.trim().length > 2000) {
+      setQuickProblem('That task is a bit long')
+      return
+    }
+    setQuickBusy(true)
+    setQuickProblem('')
+    try {
+      await createTask({ date: selected, title: quickTitle })
+      setQuickTitle('')
+      toast('Saved')
+    } catch (err) {
+      setQuickProblem(err instanceof Error ? err.message : 'Could not save')
+    } finally {
+      setQuickBusy(false)
+    }
+  }
 
   function shift(dir: number) {
     setWeekStart((current) => addDays(current, dir * 7))
@@ -34,6 +68,7 @@ export function DaysPage() {
 
   function pick(date: string) {
     setWeekStart(sundayOnOrBefore(parseISODate(date)))
+    setSelected(date)
     setCalOpen(false)
   }
 
@@ -116,6 +151,80 @@ export function DaysPage() {
             </section>
           )
         })}
+      </div>
+      <div className="agenda">
+        <aside className="agenda-side" aria-label="Week">
+          {days.map((date) => {
+            const items = tasks.filter((task) => task.date === date)
+            const done = items.filter((task) => task.done).length
+            const classes = ['agenda-day', date === today ? 'today' : '', date === selected ? 'selected' : ''].filter(Boolean).join(' ')
+            return (
+              <button key={date} type="button" className={classes} onClick={() => setSelected(date)} aria-pressed={date === selected}>
+                <span className="agenda-day-when">
+                  <span className="wk">{weekdayShort(date)}</span>
+                  <span className="num">{parseISODate(date).getDate()}</span>
+                </span>
+                <span className="agenda-day-count">
+                  {items.length === 0 ? 'Nothing yet' : `${done} of ${items.length} done`}
+                </span>
+              </button>
+            )
+          })}
+          {!thisWeek && (
+            <button className="text-btn agenda-today" type="button" onClick={() => pick(today)}>
+              Back to today
+            </button>
+          )}
+        </aside>
+        <section className="agenda-main">
+          <header className="agenda-head">
+            <div>
+              <p className="eyebrow">{selected === today ? 'Today' : weekday(selected)}</p>
+              <h2>{weekday(selected)}, {formatDay(selected)}</h2>
+            </div>
+            <button className="btn ghost agenda-add" type="button" onClick={() => setSheet({ date: selected })}>
+              Add task
+            </button>
+          </header>
+          <form className="quick-add" onSubmit={(e) => void quickAdd(e)}>
+            <label className="field task-field">
+              <span>New task for {weekday(selected)}</span>
+              <textarea
+                value={quickTitle}
+                onChange={(e) => setQuickTitle(e.target.value)}
+                placeholder="What needs doing? Write as much as you need…"
+                rows={4}
+                maxLength={2000}
+              />
+            </label>
+            {quickProblem && <p className="mismatch">{quickProblem}</p>}
+            <button className="btn primary quick-add-btn" type="submit" disabled={quickBusy}>
+              {quickBusy ? 'Saving…' : 'Add task'}
+            </button>
+          </form>
+          <div className="agenda-tasks">
+            {tasks.filter((task) => task.date === selected).length === 0 && (
+              <p className="quiet">Nothing yet for this day.</p>
+            )}
+            {tasks.filter((task) => task.date === selected).map((task) => (
+              <div key={task.uid} className={task.done ? 'task-card done' : 'task-card'}>
+                <button
+                  className={task.done ? 'check on' : 'check'}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={task.done}
+                  aria-label={task.done ? `Mark not done: ${task.title}` : `Mark done: ${task.title}`}
+                  onClick={() => void toggle(task)}
+                >
+                  {task.done ? '✓' : ''}
+                </button>
+                <button className="task-card-title" type="button" onClick={() => setSheet({ date: selected, task })}>
+                  {task.title}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
       <div className="fab">
         <button

@@ -467,7 +467,7 @@ function DayList({
   onEdit: (entry: LogEntry) => void
 }) {
   return (
-    <div>
+    <div className="daylist">
       {period.days.map((day) => {
         const entries = dayEntries(day, kind)
         const empty = entries.length === 0
