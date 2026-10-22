@@ -1,8 +1,25 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { api } from '../api'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Sheet, useApp } from '../app-context'
-import { clock, clockFace, dayNumber, formatDay, formatPeriod, hoursText, localDate, milesText, money, rateText, splitHours, weekday, weekdayShort } from '../format'
-import type { ExpenseEntry, HistoryMonth, HistoryPeriod, Kind, MileageEntry, PeriodDay, PeriodDetail, Running, Settings, TimeEntry } from '../types'
+import { clock, clockFace, clockRange, dayNumber, formatDay, formatPeriod, hoursText, localDate, milesText, money, parseISODate, rateText, splitHours, weekday, weekdayShort } from '../format'
+import { periodContaining } from '../domain/periods'
+import { history, payoutIndex, summarize, withDays } from '../domain/summary'
+import { db, getRunning } from '../store/db'
+import {
+  createExpense,
+  createMileage,
+  createTime,
+  deleteExpense,
+  deleteMileage,
+  deleteTime,
+  adjustTimer as persistTimer,
+  startTimer as beginTimer,
+  stopTimer as endTimer,
+  updateExpense,
+  updateMileage,
+  updateTime,
+} from '../store/repository'
+import type { ExpenseEntry, HistoryPeriod, Kind, MileageEntry, PeriodDay, PeriodDetail, Running, Settings, TimeEntry } from '../types'
 
 type LogEntry = TimeEntry | MileageEntry | ExpenseEntry
 
@@ -26,49 +43,49 @@ export function ExpensesPage() {
 }
 
 function LogPage({ kind }: { kind: Kind }) {
-  const { today, settings, revision, toast, bump, openSettings } = useApp()
+  const { today, settings, toast, openSettings } = useApp()
   const [start, setStart] = useState<string | null>(null)
-  const [period, setPeriod] = useState<PeriodDetail | null>(null)
   const [view, setView] = useState<'today' | 'period' | 'history'>('today')
-  const [history, setHistory] = useState<HistoryMonth[] | null>(null)
-  const [drill, setDrill] = useState<PeriodDetail | null>(null)
-  const [running, setRunning] = useState<Running | null>(null)
+  const [drill, setDrill] = useState<{ start: string; end: string } | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [sheet, setSheet] = useState<SheetState>(null)
-  const [error, setError] = useState('')
 
-  useEffect(() => {
-    let live = true
-    const params = new URLSearchParams({ today })
-    if (start) params.set('start', start)
-    api<PeriodDetail>(`/api/periods?${params}`)
-      .then((data) => {
-        if (!live) return
-        setPeriod(data)
-        setError('')
-      })
-      .catch((err: Error) => {
-        if (live) setError(err.message)
-      })
-    return () => {
-      live = false
-    }
-  }, [today, start, revision])
+  const timeEntries = useLiveQuery(() => db.time_entries.toArray(), [], [] as TimeEntry[])
+  const mileEntries = useLiveQuery(() => db.mileage_entries.toArray(), [], [] as MileageEntry[])
+  const expenseEntries = useLiveQuery(() => db.expense_entries.toArray(), [], [] as ExpenseEntry[])
+  const payoutRows = useLiveQuery(() => db.payouts.toArray(), [], [])
+  const running = useLiveQuery(() => getRunning(), [], null as Running | null)
 
-  useEffect(() => {
-    if (kind !== 'hours') return
-    let live = true
-    api<{ running: Running | null }>('/api/time/running')
-      .then((data) => {
-        if (live) setRunning(data.running)
-      })
-      .catch(() => {
-        if (live) setRunning(null)
-      })
-    return () => {
-      live = false
-    }
-  }, [kind, revision])
+  const period = useMemo(() => {
+    const anchor = parseISODate(settings.cycle_anchor)
+    const todayDate = parseISODate(today)
+    const [periodStart, periodEnd] = start
+      ? periodContaining(parseISODate(start), anchor, settings.cycle)
+      : periodContaining(todayDate, anchor, settings.cycle)
+    const payouts = payoutIndex(payoutRows)
+    return withDays(
+      summarize(periodStart, periodEnd, settings, timeEntries, mileEntries, payouts, todayDate, expenseEntries),
+      timeEntries,
+      mileEntries,
+      expenseEntries,
+    )
+  }, [settings, today, start, timeEntries, mileEntries, expenseEntries, payoutRows])
+
+  const drillPeriod = useMemo(() => {
+    if (!drill) return null
+    const payouts = payoutIndex(payoutRows)
+    return withDays(
+      summarize(parseISODate(drill.start), parseISODate(drill.end), settings, timeEntries, mileEntries, payouts, parseISODate(today), expenseEntries),
+      timeEntries,
+      mileEntries,
+      expenseEntries,
+    )
+  }, [drill, settings, today, timeEntries, mileEntries, expenseEntries, payoutRows])
+
+  const historyMonths = useMemo(
+    () => (view === 'history' ? history(settings, timeEntries, mileEntries, payoutRows, parseISODate(today), expenseEntries) : null),
+    [view, settings, today, timeEntries, mileEntries, payoutRows, expenseEntries],
+  )
 
   useEffect(() => {
     if (!running) return
@@ -76,27 +93,9 @@ function LogPage({ kind }: { kind: Kind }) {
     return () => window.clearInterval(id)
   }, [running])
 
-  useEffect(() => {
-    if (view !== 'history') return
-    let live = true
-    api<HistoryMonth[]>(`/api/history?today=${today}`)
-      .then((data) => {
-        if (live) setHistory(data)
-      })
-      .catch((err: Error) => {
-        if (live) toast(err.message)
-      })
-    return () => {
-      live = false
-    }
-  }, [view, today, revision, toast])
-
   async function startTimer() {
     try {
-      setRunning(await api<Running>('/api/time/start', {
-        method: 'POST',
-        body: JSON.stringify({ work_date: today, started_at: new Date().toISOString() }),
-      }))
+      await beginTimer(today, new Date().toISOString())
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not start')
     }
@@ -104,30 +103,16 @@ function LogPage({ kind }: { kind: Kind }) {
 
   async function stopTimer() {
     try {
-      const result = await api<{ discarded: boolean; entry: TimeEntry | null }>('/api/time/stop', {
-        method: 'POST',
-        body: JSON.stringify({ ended_at: new Date().toISOString() }),
-      })
-      setRunning(null)
+      const result = await endTimer(new Date().toISOString())
       if (result.discarded) toast('That was too short to save')
       else if (result.entry && result.entry.hours > 16) toast('That was a long clock-in. Tap it if the hours need a fix.')
       else toast('Hours saved')
-      bump()
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not stop')
     }
   }
 
-  async function openHistory(item: HistoryPeriod) {
-    try {
-      const params = new URLSearchParams({ today, start: item.start, end: item.end })
-      setDrill(await api<PeriodDetail>(`/api/periods?${params}`))
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not open that period')
-    }
-  }
-
-  const shown = view === 'history' && drill ? drill : period
+  const shown = view === 'history' && drillPeriod ? drillPeriod : period
   const title = pageTitle(kind)
 
   function openEntry(entry: LogEntry) {
@@ -139,10 +124,10 @@ function LogPage({ kind }: { kind: Kind }) {
   return (
     <main className="screen">
       <h1>{title}</h1>
-      {kind === 'hours' && settings && settings.hourly_rate <= 0 && (
+      {kind === 'hours' && settings.hourly_rate <= 0 && (
         <button className="nudge" type="button" onClick={openSettings}>Add an hourly rate to see what this period will pay.</button>
       )}
-      {kind === 'mileage' && settings && settings.mileage_rate <= 0 && (
+      {kind === 'mileage' && settings.mileage_rate <= 0 && (
         <button className="nudge" type="button" onClick={openSettings}>Add a per-mile rate to see the reimbursement.</button>
       )}
       {kind === 'hours' && running && (
@@ -151,7 +136,7 @@ function LogPage({ kind }: { kind: Kind }) {
           now={now}
           today={today}
           onStop={() => void stopTimer()}
-          onAdjusted={setRunning}
+          onAdjust={persistTimer}
           toast={toast}
         />
       )}
@@ -161,12 +146,12 @@ function LogPage({ kind }: { kind: Kind }) {
         <button type="button" className={view === 'history' ? 'on' : ''} onClick={() => setView('history')}>History</button>
       </div>
       {view === 'history' && !drill && (
-        <HistoryList months={history} kind={kind} onOpen={(item) => void openHistory(item)} />
+        <HistoryList months={historyMonths} kind={kind} onOpen={(item) => setDrill({ start: item.start, end: item.end })} />
       )}
       {view === 'history' && drill && (
         <button className="back" type="button" onClick={() => setDrill(null)}>Back to history</button>
       )}
-      {view === 'today' && period && settings && (
+      {view === 'today' && (
         <TodayCard
           period={period}
           kind={kind}
@@ -177,7 +162,7 @@ function LogPage({ kind }: { kind: Kind }) {
           onEdit={openEntry}
         />
       )}
-      {view === 'period' && period && settings && (
+      {view === 'period' && (
         <>
           <PeriodCard period={period} kind={kind} settings={settings} />
           <DayList
@@ -189,7 +174,7 @@ function LogPage({ kind }: { kind: Kind }) {
           />
         </>
       )}
-      {view === 'history' && drill && shown && settings && (
+      {view === 'history' && drill && shown && (
         <>
           <PeriodCard period={shown} kind={kind} settings={settings} />
           <DayList
@@ -201,13 +186,6 @@ function LogPage({ kind }: { kind: Kind }) {
           />
         </>
       )}
-      {(view === 'today' || view === 'period') && !period && !error && <div className="skeleton" />}
-      {(view === 'today' || view === 'period') && error && !period && (
-        <div className="card">
-          <p>{error}</p>
-          <button className="btn blush" type="button" onClick={bump}>Try again</button>
-        </div>
-      )}
       <EntrySheet
         sheet={sheet}
         kind={kind}
@@ -216,8 +194,6 @@ function LogPage({ kind }: { kind: Kind }) {
         onDone={(message) => {
           setSheet(null)
           toast(message)
-          bump()
-          if (drill) void openHistory(drill)
         }}
       />
     </main>
@@ -247,14 +223,14 @@ function RunningTimer({
   now,
   today,
   onStop,
-  onAdjusted,
+  onAdjust,
   toast,
 }: {
   running: Running
   now: number
   today: string
   onStop: () => void
-  onAdjusted: (next: Running) => void
+  onAdjust: (date: string, startedAt: string) => Promise<void>
   toast: (message: string) => void
 }) {
   const [localStart, setLocalStart] = useState(running.started_at)
@@ -296,20 +272,14 @@ function RunningTimer({
       if (!saveTimer.current) return
       window.clearTimeout(saveTimer.current)
       const iso = startRef.current
-      void api('/api/time/running', {
-        method: 'PATCH',
-        body: JSON.stringify({ started_at: iso, work_date: localDate(new Date(iso)) }),
-      })
+      void onAdjust(localDate(new Date(iso)), iso)
     }
   }, [])
 
   function persist(iso: string) {
     const run = tail.current.then(async () => {
       try {
-        onAdjusted(await api<Running>('/api/time/running', {
-          method: 'PATCH',
-          body: JSON.stringify({ started_at: iso, work_date: localDate(new Date(iso)) }),
-        }))
+        await onAdjust(localDate(new Date(iso)), iso)
       } catch (err) {
         toast(err instanceof Error ? err.message : 'Could not update the start')
       }
@@ -441,7 +411,7 @@ function TodayCard({
       </div>
       {entries.length === 0 && <p className="quiet">Nothing logged today</p>}
       {entries.map((entry) => (
-        <EntryButton key={entry.id} entry={entry} today onEdit={onEdit} />
+        <EntryButton key={entry.uid} entry={entry} today onEdit={onEdit} />
       ))}
     </section>
   )
@@ -497,7 +467,7 @@ function DayList({
   onEdit: (entry: LogEntry) => void
 }) {
   return (
-    <div>
+    <div className="daylist">
       {period.days.map((day) => {
         const entries = dayEntries(day, kind)
         const empty = entries.length === 0
@@ -518,7 +488,7 @@ function DayList({
               ) : <span />}
             </div>
             {entries.map((entry) => (
-              <EntryButton key={entry.id} entry={entry} onEdit={onEdit} />
+              <EntryButton key={entry.uid} entry={entry} onEdit={onEdit} />
             ))}
           </section>
         )
@@ -555,6 +525,9 @@ function EntryButton({
         <>
           <span>{'hours' in entry ? hoursText(entry.hours) : milesText(entry.miles)}</span>
           {'source' in entry && entry.source === 'timer' && <em>clocked</em>}
+          {'started_at' in entry && entry.started_at && entry.ended_at && (
+            <span className="entry-times">{clockRange(entry.started_at, entry.ended_at)}</span>
+          )}
           {entry.note ? <span className="entry-note">{entry.note}</span> : <span className="entry-note" />}
           {!today && 'pay' in entry && <span className="entry-pay">{money(entry.pay)}</span>}
         </>
@@ -568,7 +541,7 @@ function HistoryList({
   kind,
   onOpen,
 }: {
-  months: HistoryMonth[] | null
+  months: ReturnType<typeof history> | null
   kind: Kind
   onOpen: (item: HistoryPeriod) => void
 }) {
@@ -739,17 +712,14 @@ function LogForm({
     setProblem('')
     try {
       if (kind === 'hours') {
-        const body = { work_date: day, hours: value, note }
-        if (entry) await api(`/api/time/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-        else await api('/api/time', { method: 'POST', body: JSON.stringify(body) })
+        if (entry) await updateTime(entry.uid, { date: day, hours: value, note })
+        else await createTime({ date: day, hours: value, note })
       } else if (kind === 'expenses') {
-        const body = { expense_date: day, amount: value, note }
-        if (entry) await api(`/api/expenses/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-        else await api('/api/expenses', { method: 'POST', body: JSON.stringify(body) })
+        if (entry) await updateExpense(entry.uid, { date: day, amount: value, note })
+        else await createExpense({ date: day, amount: value, note })
       } else {
-        const body = { drive_date: day, miles: value, note }
-        if (entry) await api(`/api/mileage/${entry.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-        else await api('/api/mileage', { method: 'POST', body: JSON.stringify(body) })
+        if (entry) await updateMileage(entry.uid, { date: day, miles: value, note })
+        else await createMileage({ date: day, miles: value, note })
       }
       onDone('Saved')
     } catch (err) {
@@ -767,8 +737,9 @@ function LogForm({
     }
     setBusy(true)
     try {
-      const path = kind === 'hours' ? `/api/time/${entry.id}` : kind === 'expenses' ? `/api/expenses/${entry.id}` : `/api/mileage/${entry.id}`
-      await api(path, { method: 'DELETE' })
+      if (kind === 'hours') await deleteTime(entry.uid)
+      else if (kind === 'expenses') await deleteExpense(entry.uid)
+      else await deleteMileage(entry.uid)
       onDone('Deleted')
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'Could not delete')
@@ -776,12 +747,17 @@ function LogForm({
     }
   }
 
+  const clockedTimes = entry && 'started_at' in entry ? clockRange(entry.started_at, entry.ended_at) : ''
+
   return (
     <form onSubmit={save}>
       <label className="field">
         <span>Day</span>
         <input type="date" value={day} max={today} onChange={(e) => setDay(e.target.value)} required />
       </label>
+      {clockedTimes && (
+        <p className="help clocked-times">Clocked in – out: {clockedTimes}</p>
+      )}
       {kind === 'hours' ? (
         <div className="hm">
           <label className="field">
@@ -811,5 +787,3 @@ function LogForm({
     </form>
   )
 }
-
-

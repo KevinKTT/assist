@@ -11,6 +11,7 @@ export type Settings = {
 
 export type Payout = {
   id: number
+  uid: string
   kind: 'hours' | 'mileage' | 'expenses'
   period_start: string
   period_end: string
@@ -21,6 +22,7 @@ export type Payout = {
 
 export type TimeEntry = {
   id: number
+  uid: string
   date: string
   hours: number
   rate: number
@@ -33,6 +35,7 @@ export type TimeEntry = {
 
 export type MileageEntry = {
   id: number
+  uid: string
   date: string
   miles: number
   rate: number
@@ -42,6 +45,7 @@ export type MileageEntry = {
 
 export type ExpenseEntry = {
   id: number
+  uid: string
   date: string
   amount: number
   note: string
@@ -93,6 +97,7 @@ export type HistoryMonth = {
 
 export type Task = {
   id: number
+  uid: string
   date: string
   title: string
   done: boolean
@@ -153,6 +158,7 @@ export type Dashboard = {
 
 export type Running = {
   id: number
+  uid: string
   date: string
   started_at: string
   created_at: string

@@ -1,17 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api } from './api'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db, DEFAULT_SETTINGS } from './store/db'
+import { saveSettings } from './store/repository'
+import { getSyncState, startSyncLoop, subscribeSync, sync, type SyncState } from './store/sync'
 import type { Settings } from './types'
 import { localDate } from './format'
 
 type AppContextValue = {
   today: string
-  settings: Settings | null
-  error: string | null
-  revision: number
+  settings: Settings
+  ready: boolean
+  sync: SyncState
   openSettings: () => void
   toast: (message: string) => void
-  bump: () => void
-  refresh: () => Promise<void>
+  syncNow: () => void
 }
 
 const Ctx = createContext<AppContextValue | null>(null)
@@ -38,70 +40,51 @@ function useToday() {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const today = useToday()
-  const [settings, setSettings] = useState<Settings | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const todayRef = useRef(today)
+  todayRef.current = today
+  const settingsRow = useLiveQuery(() => db.settings.get(1), [])
+  const [syncState, setSyncState] = useState<SyncState>(getSyncState)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const [revision, setRevision] = useState(0)
   const toastTimer = useRef<number | null>(null)
-  const bump = useCallback(() => setRevision((n) => n + 1), [])
+
+  useEffect(() => subscribeSync(() => setSyncState(getSyncState())), [])
+
+  useEffect(() => startSyncLoop(() => todayRef.current), [])
+
   const toast = useCallback((next: string) => {
     setMessage(next)
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
     toastTimer.current = window.setTimeout(() => setMessage(null), 2800)
   }, [])
-  const refresh = useCallback(async () => {
-    try {
-      setSettings(await api<Settings>(`/api/settings?today=${today}`))
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Can't reach assist")
-    }
-  }, [today])
 
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === 'visible') bump()
-    }
-    document.addEventListener('visibilitychange', onVis)
-    return () => document.removeEventListener('visibilitychange', onVis)
-  }, [bump])
+  const settings = settingsRow ?? DEFAULT_SETTINGS
 
   const value = useMemo(
     () => ({
       today,
       settings,
-      error,
-      revision,
+      ready: settingsRow !== undefined,
+      sync: syncState,
       openSettings: () => setSettingsOpen(true),
       toast,
-      bump,
-      refresh,
+      syncNow: () => void sync(todayRef.current),
     }),
-    [today, settings, error, revision, toast, bump, refresh],
+    [today, settings, settingsRow, syncState, toast],
   )
 
   return (
     <Ctx.Provider value={value}>
       {children}
-      {settings && (
-        <SettingsSheet
-          open={settingsOpen}
-          settings={settings}
-          today={today}
-          onClose={() => setSettingsOpen(false)}
-          onSaved={async () => {
-            await refresh()
-            bump()
-            toast('Saved')
-            setSettingsOpen(false)
-          }}
-        />
-      )}
+      <SettingsSheet
+        open={settingsOpen}
+        settings={settings}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={async () => {
+          toast('Saved')
+          setSettingsOpen(false)
+        }}
+      />
       {message && <div className="toast" role="status">{message}</div>}
     </Ctx.Provider>
   )
@@ -110,13 +93,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 function SettingsSheet({
   open,
   settings,
-  today,
   onClose,
   onSaved,
 }: {
   open: boolean
   settings: Settings
-  today: string
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
@@ -150,16 +131,13 @@ function SettingsSheet({
     setBusy(true)
     setProblem('')
     try {
-      await api('/api/settings?today=' + today, {
-        method: 'PUT',
-        body: JSON.stringify({
-          display_name: name,
-          hourly_rate: hourlyRate,
-          mileage_rate: mileageRate,
-          cycle,
-          cycle_anchor: anchor,
-          payday_offset_days: null,
-        }),
+      await saveSettings({
+        display_name: name,
+        hourly_rate: hourlyRate,
+        mileage_rate: mileageRate,
+        cycle,
+        cycle_anchor: anchor,
+        payday_offset_days: null,
       })
       await onSaved()
     } catch (err) {

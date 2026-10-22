@@ -10,12 +10,45 @@ services:
       - "${ASSIST_PORT:-8080}:8080"
     environment:
       ASSIST_DATA_DIR: /data
+      ASSIST_BACKUP_DIR: /backups
+      ASSIST_LOG_LEVEL: ${ASSIST_LOG_LEVEL:-INFO}
+      # Optional dead-man's-switch ping (healthchecks.io, ntfy, ...). Blank = off.
+      ASSIST_HEARTBEAT_URL: ${ASSIST_HEARTBEAT_URL:-}
+      ASSIST_HEARTBEAT_SECONDS: ${ASSIST_HEARTBEAT_SECONDS:-60}
+      # Optional off-host copies. Leave blank to keep backups local only.
+      SEAFILE_URL: ${SEAFILE_URL:-}
+      SEAFILE_TOKEN: ${SEAFILE_TOKEN:-}
+      SEAFILE_REPO_ID: ${SEAFILE_REPO_ID:-}
+      SEAFILE_DIR: ${SEAFILE_DIR:-/assist-backups}
     volumes:
       - ${ASSIST_DATA:-./data}:/data
+      - ${ASSIST_BACKUPS:-./backups}:/backups
     restart: unless-stopped
+    stop_grace_period: 20s
+    # Keep a runaway process from taking the whole host down.
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health')"]
+      # Readiness: fails if the database or backup directory is not usable.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/ready')"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
+
+# Docker marks an unhealthy container but does not restart it. To restart it
+# automatically, uncomment this. It needs the Docker socket, so only do it if
+# you are comfortable with that.
+#  autoheal:
+#    image: willfarrell/autoheal:latest
+#    container_name: assist-autoheal
+#    restart: unless-stopped
+#    environment:
+#      AUTOHEAL_CONTAINER_LABEL: all
+#    volumes:
+#      - /var/run/docker.sock:/var/run/docker.sock

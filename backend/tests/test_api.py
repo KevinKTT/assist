@@ -19,7 +19,7 @@ def test_pay_miles_tasks_and_exports(tmp_path):
         today = "2026-03-10"
         settings = client.get("/api/settings", params={"today": today}).json()
         settings.update({
-            "display_name": "Katie",
+            "display_name": "Test User",
             "hourly_rate": 20,
             "mileage_rate": 0.7,
             "cycle": "biweekly",
@@ -86,6 +86,11 @@ def test_pay_miles_tasks_and_exports(tmp_path):
         empty = client.post("/api/tasks", json={"task_date": "2026-03-12", "title": "   "})
         assert empty.status_code == 400
 
+        paragraph = "First line of a longer task.\nSecond line with more detail. " * 3
+        long_task = client.post("/api/tasks", json={"task_date": "2026-03-12", "title": paragraph})
+        assert long_task.status_code == 200
+        assert long_task.json()["title"] == paragraph.strip()
+
         csv = client.get("/api/export/csv", params={"start": "2026-03-02", "end": "2026-03-15", "today": today})
         assert csv.status_code == 200
         assert "Call school" in csv.text
@@ -93,6 +98,13 @@ def test_pay_miles_tasks_and_exports(tmp_path):
         pdf = client.get("/api/export/pdf", params={"start": "2026-03-02", "end": "2026-03-15", "today": today})
         assert pdf.status_code == 200
         assert pdf.content.startswith(b"%PDF")
+        summary = client.get(
+            "/api/export/pdf",
+            params={"start": "2026-03-02", "end": "2026-03-15", "today": today, "tasks": "count"},
+        )
+        assert summary.status_code == 200
+        assert summary.content.startswith(b"%PDF")
+        assert 'filename="assist-2026-03-02-to-2026-03-15-summary.pdf"' in summary.headers["content-disposition"]
 
         dash = client.get("/api/dashboard", params={"today": today}).json()
         assert dash["period"]["hours"] == 9
@@ -131,7 +143,7 @@ def test_expenses_roll_into_pay_and_exports(tmp_path):
     with make_client(tmp_path) as client:
         today = "2026-03-10"
         client.put("/api/settings", params={"today": today}, json={
-            "display_name": "Katie",
+            "display_name": "Test User",
             "hourly_rate": 20,
             "mileage_rate": 0.7,
             "cycle": "biweekly",

@@ -41,6 +41,121 @@ ASSIST_DATA=/srv/assist docker compose up -d
 
 Chrome can install it on a phone once this is reached over HTTPS.
 
+### Configuration
+
+Copy `.env.example` to `.env` and edit it:
+
+```bash
+cp .env.example .env
+```
+
+Every setting is optional. The defaults are:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `ASSIST_PORT` | `8080` | Host port the app is served on (`http://<host>:8080`) |
+| `ASSIST_DATA` | `./data` | Host folder for the database |
+| `ASSIST_BACKUPS` | `./backups` | Host folder for snapshots |
+| `ASSIST_LOG_LEVEL` | `INFO` | Log verbosity |
+| `ASSIST_HEARTBEAT_URL` | *(off)* | Pinged on a timer so a down server is noticed |
+| `ASSIST_HEARTBEAT_SECONDS` | `60` | How often to ping |
+| `SEAFILE_URL` | *(off)* | Seafile base URL for off-host backups |
+| `SEAFILE_TOKEN` | *(off)* | Seafile API token |
+| `SEAFILE_REPO_ID` | *(off)* | Seafile library to upload into |
+| `SEAFILE_DIR` | `/assist-backups` | Folder inside that library |
+
+`.env` is git-ignored; `.env.example` is the committed template with notes on
+where to find each value (the Seafile URL, token, and library id).
+
+## Backups
+
+assist snapshots its database on startup and hourly, into `./backups` on the
+host (override with `ASSIST_BACKUPS`). It keeps the newest snapshot for each of
+the last 24 hours, then one per day for the last 7 days.
+
+The snapshot is a complete, consistent copy of the SQLite database, so restoring
+is just dropping it back in as `data/assist.db`. There is also a JSON dump and
+restore:
+
+- `GET /api/backup.json` — every record as JSON.
+- `POST /api/restore` — replace everything from a dump produced above.
+
+If the database file goes missing or comes up empty while a data directory has
+been used before, the app refuses to start rather than silently creating a blank
+database.
+
+### Off-host copies to Seafile
+
+Set these to also push each snapshot to a Seafile library (via the Web API, no
+sync client needed). Leave them unset to keep backups local only.
+
+```bash
+SEAFILE_URL=https://seafile.example.com \
+SEAFILE_TOKEN=your-api-token \
+SEAFILE_REPO_ID=the-library-id \
+SEAFILE_DIR=/assist-backups \
+docker compose up -d
+```
+
+Snapshots are uploaded under timestamped names and the remote keeps the newest
+30, so a bad snapshot can never overwrite a good one. If Seafile is unreachable,
+the upload is logged and retried on the next cycle; the app is unaffected.
+
+## Offline and syncing
+
+The web app is offline-first. It keeps everything in the browser (IndexedDB) and
+works with no connection at all:
+
+- Reads come from the local copy, so the app opens and shows your data instantly
+  even when the server is unreachable.
+- Writes are saved locally first and queued, then sent when the server is
+  reachable again. A banner shows "Offline" or how many changes are waiting.
+- The running timer, logging hours/miles/expenses, tasks, marking a period paid,
+  and CSV export all work offline. PDF export needs the server.
+- It syncs on reconnect, when you return to the app, every 30 seconds, and right
+  after a change. A successful sync replaces the local copy with the server's.
+
+Every record has a stable `uid`. Creates send that `uid`, and the server treats
+the same `uid` as the same record, so a retried request can never create a
+duplicate. Edits and deletes are idempotent — deleting something already gone is
+not an error. The client also retries failed requests with backoff, so a brief
+blip is usually invisible.
+
+`GET /api/sync` returns the full state (settings, entries, tasks, payouts, and
+any running timer) with each record's `uid`, which is what the client uses to
+reconcile. The client's offline maths are checked against the server's output in
+`frontend/src/domain/parity.test.ts` (regenerate the fixture with
+`uv run --directory backend python tests/generate_parity_fixture.py`).
+
+## Running it
+
+The container is set up to be left alone:
+
+- **Health checks.** `GET /api/health` is liveness (the process is up).
+  `GET /api/ready` is readiness and returns `503` if the database fails a quick
+  integrity check or the backup directory is not writable. The Docker healthcheck
+  polls `/api/ready`.
+- **Logs.** Written to stdout and captured by Docker with rotation (5 files of
+  10 MB). Set `ASSIST_LOG_LEVEL` (default `INFO`) to change verbosity.
+- **Limits.** The container is capped at 512 MB and 1 CPU so a problem can't take
+  the host down.
+- **Shutdown.** `stop_grace_period` is 20s; on stop the app closes the database
+  and stops its backup and heartbeat threads cleanly.
+
+### Monitoring
+
+Docker marks an unhealthy container but does not restart it. To actually be
+alerted when the server is down, use something outside the box:
+
+- Point a monitor (Uptime Kuma, healthchecks.io, ...) at `/api/ready` over
+  Tailscale. Uptime Kuma can send a notification (ntfy, email) when it fails.
+- Or set `ASSIST_HEARTBEAT_URL` to a healthchecks.io ping URL or ntfy topic. The
+  app pings it every `ASSIST_HEARTBEAT_SECONDS` (default 60). If the server dies,
+  the pings stop and the service raises the alarm.
+
+Access is over Tailscale (through Caddy for HTTPS), so there is no app-level
+login by design.
+
 ## Tests
 
 ```bash
