@@ -668,7 +668,8 @@ h2 { font-family: var(--display); font-weight: 600; }
   font-weight: 800;
 }
 .swatch.miles { background: #e989c8; }
-.export-row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; margin-top: 12px; }
+.export-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.export-row .btn { flex: 1 1 9rem; width: auto; }
 .skeleton {
   height: 168px;
   border-radius: var(--radius);

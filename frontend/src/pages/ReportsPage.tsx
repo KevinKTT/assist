@@ -18,7 +18,7 @@ export function ReportsPage() {
   const [preset, setPreset] = useState<Preset>('period')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
-  const [busy, setBusy] = useState<'csv' | 'pdf' | null>(null)
+  const [busy, setBusy] = useState<'csv' | 'pdf' | 'summary' | null>(null)
   const range = bounds(preset, today, customStart, customEnd)
 
   const timeEntries = useLiveQuery(() => db.time_entries.toArray(), [], [])
@@ -58,7 +58,7 @@ export function ReportsPage() {
     )
   }
 
-  async function exportFile(ext: 'csv' | 'pdf') {
+  async function exportFile(ext: 'csv' | 'pdf' | 'summary') {
     if (!data) return
     setBusy(ext)
     try {
@@ -67,7 +67,12 @@ export function ReportsPage() {
         if (built) downloadCsv(renderCsv(built), `assist-${data.range.start}-to-${data.range.end}.csv`)
       } else {
         const params = new URLSearchParams({ start: data.range.start, end: data.range.end, today })
-        await downloadFile(`/api/export/pdf?${params}`, `assist-${data.range.start}-to-${data.range.end}.pdf`)
+        const summary = ext === 'summary'
+        if (summary) params.set('tasks', 'count')
+        const name = summary
+          ? `assist-${data.range.start}-to-${data.range.end}-summary.pdf`
+          : `assist-${data.range.start}-to-${data.range.end}.pdf`
+        await downloadFile(`/api/export/pdf?${params}`, name)
       }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not export')
@@ -186,13 +191,16 @@ export function ReportsPage() {
       </section>
       <div className="export-row">
         <button className="btn primary" type="button" disabled={busy !== null || !chartReady} onClick={() => void exportFile('pdf')}>
-          {busy === 'pdf' ? 'Preparing…' : 'Download PDF'}
+          {busy === 'pdf' ? 'Preparing…' : 'PDF with tasks'}
+        </button>
+        <button className="btn ghost" type="button" disabled={busy !== null || !chartReady} onClick={() => void exportFile('summary')}>
+          {busy === 'summary' ? 'Preparing…' : 'PDF, task count'}
         </button>
         <button className="btn ghost" type="button" disabled={busy !== null || !chartReady} onClick={() => void exportFile('csv')}>
           {busy === 'csv' ? 'Preparing…' : 'CSV'}
         </button>
       </div>
-      <p className="help">Includes hours, miles, expenses, tasks, and payouts in this range. CSV works offline; PDF needs the server.</p>
+      <p className="help">Both PDFs include hours, miles, expenses, and payouts. PDF with tasks names each task. PDF, task count only says how many were completed. CSV works offline; PDF needs the server.</p>
       <PaySheet
         open={payOpen}
         today={today}

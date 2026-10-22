@@ -98,6 +98,13 @@ def test_pay_miles_tasks_and_exports(tmp_path):
         pdf = client.get("/api/export/pdf", params={"start": "2026-03-02", "end": "2026-03-15", "today": today})
         assert pdf.status_code == 200
         assert pdf.content.startswith(b"%PDF")
+        summary = client.get(
+            "/api/export/pdf",
+            params={"start": "2026-03-02", "end": "2026-03-15", "today": today, "tasks": "count"},
+        )
+        assert summary.status_code == 200
+        assert summary.content.startswith(b"%PDF")
+        assert 'filename="assist-2026-03-02-to-2026-03-15-summary.pdf"' in summary.headers["content-disposition"]
 
         dash = client.get("/api/dashboard", params={"today": today}).json()
         assert dash["period"]["hours"] == 9

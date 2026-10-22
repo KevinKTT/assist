@@ -529,8 +529,9 @@ def build_report(settings, time_rows, mile_rows, payout_rows, task_rows, expense
     }
 
 
-def filename(start: date, end: date, ext: str) -> str:
-    return f"assist-{start.isoformat()}-to-{end.isoformat()}.{ext}"
+def filename(start: date, end: date, ext: str, label: str = "") -> str:
+    suffix = f"-{label}" if label else ""
+    return f"assist-{start.isoformat()}-to-{end.isoformat()}{suffix}.{ext}"
 
 
 SNAPSHOT_TABLES = (
@@ -1283,17 +1284,20 @@ def export_csv(start: str, end: str, today: str | None = None):
 
 
 @app.get("/api/export/pdf")
-def export_pdf(start: str, end: str, today: str | None = None):
+def export_pdf(start: str, end: str, today: str | None = None, tasks: str = "detail"):
+    if tasks not in ("detail", "count"):
+        raise HTTPException(status_code=400, detail="Use detail or count for tasks")
     day = resolve_today(today)
     first, last = parse_range(start, end)
     with get_db().transaction() as conn:
         settings = dict(ensure_settings(conn, day))
         time_rows, mile_rows, payout_rows, task_rows, expense_rows = load_logs(conn)
     report = build_report(settings, time_rows, mile_rows, payout_rows, task_rows, expense_rows, first, last, day)
+    label = "summary" if tasks == "count" else ""
     return Response(
-        content=render_pdf(report),
+        content=render_pdf(report, tasks),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename(first, last, "pdf")}"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename(first, last, "pdf", label)}"'},
     )
 
 

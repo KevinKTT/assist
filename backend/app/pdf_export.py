@@ -137,7 +137,7 @@ def summary_box(pdf: AssistPDF, x: float, y: float, w: float, h: float, fill, la
     pdf.cell(w - 8, 8, value)
 
 
-def render_pdf(report: dict) -> bytes:
+def render_pdf(report: dict, tasks: str = "detail") -> bytes:
     pdf = AssistPDF()
     pdf.set_title("assist report")
     pdf.set_author(pdf_text(report["name"]) or "assist")
@@ -224,21 +224,34 @@ def render_pdf(report: dict) -> bytes:
             entry(pdf, long_day(item["date"]), money(item["amount"]), item["note"])
         total_bar(pdf, "Expenses", money(report["expenses"]))
 
-    section(pdf, "Tasks completed")
-    done = [task for task in report["tasks"] if task["done"]]
-    open_tasks = [task for task in report["tasks"] if not task["done"]]
-    if not done:
+    if tasks == "count":
+        section(pdf, "Tasks completed")
+        done_count = report["tasks_done"]
+        if done_count == 0:
+            line = "No completed tasks in this range"
+        elif done_count == 1:
+            line = "1 task completed"
+        else:
+            line = f"{done_count} tasks completed"
         pdf.set_font("Nunito", "I", 10)
         pdf.set_text_color(*MUTED)
-        pdf.cell(0, 6, "No completed tasks in this range", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
     else:
-        for task in done:
-            entry(pdf, long_day(task["date"]), "Done", task["title"])
+        section(pdf, "Tasks completed")
+        done = [task for task in report["tasks"] if task["done"]]
+        open_tasks = [task for task in report["tasks"] if not task["done"]]
+        if not done:
+            pdf.set_font("Nunito", "I", 10)
+            pdf.set_text_color(*MUTED)
+            pdf.cell(0, 6, "No completed tasks in this range", new_x="LMARGIN", new_y="NEXT")
+        else:
+            for task in done:
+                entry(pdf, long_day(task["date"]), "Done", task["title"])
 
-    if open_tasks:
-        section(pdf, "Still open")
-        for task in open_tasks:
-            entry(pdf, long_day(task["date"]), "Open", task["title"])
+        if open_tasks:
+            section(pdf, "Still open")
+            for task in open_tasks:
+                entry(pdf, long_day(task["date"]), "Open", task["title"])
 
     section(pdf, "Received")
     if not report["payouts"]:
