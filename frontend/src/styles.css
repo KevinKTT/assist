@@ -531,11 +531,32 @@ h2 { font-family: var(--display); font-weight: 600; }
 }
 .task {
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: 28px minmax(0, 1fr) 36px;
   gap: 8px;
   align-items: start;
   padding: 6px 0;
 }
+.grip {
+  width: 36px;
+  height: 28px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  touch-action: none;
+  cursor: grab;
+}
+.grip svg { width: 18px; height: 18px; }
+.grip:active { cursor: grabbing; }
+.task.dragging, .task-card.dragging {
+  position: relative;
+  z-index: 2;
+  background: white;
+  box-shadow: 0 10px 24px rgba(200, 90, 140, 0.18);
+  cursor: grabbing;
+}
+.task.dragging { border-radius: 14px; }
+.task-card.dragging { border-radius: 18px; }
 .check {
   width: 26px;
   height: 26px;
@@ -873,7 +894,7 @@ h2 { font-family: var(--display); font-weight: 600; }
   .agenda-tasks { display: flex; flex-direction: column; gap: 10px; }
   .task-card {
     display: grid;
-    grid-template-columns: 28px minmax(0, 1fr);
+    grid-template-columns: 28px minmax(0, 1fr) 36px;
     gap: 10px;
     align-items: start;
     background: white;

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from './db'
-import { createTime, updateTime } from './repository'
+import { createTask, createTime, reorderTasks, updateTask, updateTime } from './repository'
 import { getSyncState, setAutoSync, sync, type Snapshot } from './sync'
 
 function json(body: unknown, status = 200): Response {
@@ -168,5 +168,45 @@ describe('offline outbox', () => {
     expect((await db.settings.get(1))?.display_name).toBe('Test User')
     expect(await db.mileage_entries.count()).toBe(1)
     expect(await db.outbox.count()).toBe(0)
+  })
+})
+
+describe('task order', () => {
+  it('folds a reorder into tasks that have not synced yet', async () => {
+    await createTask({ date: '2026-03-11', title: 'Call school' })
+    await createTask({ date: '2026-03-11', title: 'Pack lunch' })
+    const created = (await db.tasks.toArray()).sort((a, b) => a.sort_order - b.sort_order)
+    await reorderTasks('2026-03-11', [created[1].uid, created[0].uid])
+
+    const tasks = (await db.tasks.toArray()).sort((a, b) => a.sort_order - b.sort_order)
+    expect(tasks.map((task) => task.title)).toEqual(['Pack lunch', 'Call school'])
+    const ops = await db.outbox.orderBy('seq').toArray()
+    expect(ops.map((op) => op.method)).toEqual(['POST', 'POST'])
+    const body = new Map(ops.map((op) => [op.uid, op.body as { sort_order: number }]))
+    expect(body.get(created[1].uid)?.sort_order).toBe(1)
+    expect(body.get(created[0].uid)?.sort_order).toBe(2)
+  })
+
+  it('patches saved tasks once, and a later reorder updates those patches', async () => {
+    await createTask({ date: '2026-03-11', title: 'Call school' })
+    await createTask({ date: '2026-03-11', title: 'Pack lunch' })
+    await createTask({ date: '2026-03-12', title: 'Already there' })
+    await db.outbox.clear()
+    const [first, second] = (await db.tasks.where('date').equals('2026-03-11').toArray()).sort((a, b) => a.sort_order - b.sort_order)
+
+    await reorderTasks('2026-03-11', [second.uid, first.uid])
+    await reorderTasks('2026-03-11', [first.uid, second.uid])
+    const ops = await db.outbox.orderBy('seq').toArray()
+    expect(ops).toHaveLength(2)
+    expect(ops.every((op) => op.method === 'PATCH')).toBe(true)
+    const body = new Map(ops.map((op) => [op.uid, op.body as { sort_order: number; title: string }]))
+    expect(body.get(first.uid)?.sort_order).toBe(1)
+    expect(body.get(second.uid)?.sort_order).toBe(2)
+
+    await updateTask(first.uid, { date: '2026-03-12' })
+    const moved = await db.tasks.get(first.uid)
+    expect(moved?.sort_order).toBe(2)
+    const movedOp = (await db.outbox.where('uid').equals(first.uid).toArray()).find((op) => op.method === 'PATCH')
+    expect(movedOp?.body).toMatchObject({ task_date: '2026-03-12', sort_order: 2, title: 'Call school' })
   })
 })
