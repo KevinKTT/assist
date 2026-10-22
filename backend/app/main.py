@@ -138,12 +138,14 @@ class TaskIn(BaseModel):
     task_date: str
     title: str
     uid: str | None = None
+    sort_order: int | None = None
 
 
 class TaskPatch(BaseModel):
     task_date: str | None = None
     title: str | None = None
     done: bool | None = None
+    sort_order: int | None = None
 
 
 class PayoutIn(BaseModel):
@@ -184,6 +186,12 @@ def clean_note(value: str) -> str:
     if len(note) > 2000:
         raise HTTPException(status_code=400, detail="That note is a bit long")
     return note
+
+
+def check_sort_order(value: int) -> int:
+    if value < 1:
+        raise HTTPException(status_code=400, detail="That order isn't valid")
+    return value
 
 
 def clean_title(value: str) -> str:
@@ -1031,17 +1039,21 @@ def create_task(body: TaskIn):
         existing = conn.execute("SELECT * FROM tasks WHERE uid = ?", (uid,)).fetchone()
         if existing:
             return task_out(dict(existing))
-        current = conn.execute(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM tasks WHERE task_date = ?",
-            (task_date.isoformat(),),
-        ).fetchone()[0]
+        if body.sort_order is None:
+            current = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM tasks WHERE task_date = ?",
+                (task_date.isoformat(),),
+            ).fetchone()[0]
+            sort_order = current + 1
+        else:
+            sort_order = check_sort_order(body.sort_order)
         stamp = now_iso()
         cur = conn.execute(
             """
             INSERT INTO tasks (task_date, title, done, done_at, sort_order, created_at, updated_at, uid)
             VALUES (?, ?, 0, NULL, ?, ?, ?, ?)
             """,
-            (task_date.isoformat(), title, current + 1, stamp, stamp, uid),
+            (task_date.isoformat(), title, sort_order, stamp, stamp, uid),
         )
         row = dict(conn.execute("SELECT * FROM tasks WHERE id = ?", (cur.lastrowid,)).fetchone())
     return task_out(row)
@@ -1064,13 +1076,23 @@ def patch_task(task_id: str, body: TaskPatch):
         done_at = current["done_at"]
         if body.done is not None:
             done_at = now_iso() if body.done else None
+        if body.sort_order is not None:
+            sort_order = check_sort_order(body.sort_order)
+        elif task_date != current["task_date"]:
+            current_max = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM tasks WHERE task_date = ? AND id != ?",
+                (task_date, current["id"]),
+            ).fetchone()[0]
+            sort_order = current_max + 1
+        else:
+            sort_order = current["sort_order"]
         conn.execute(
             """
             UPDATE tasks
-            SET task_date = ?, title = ?, done = ?, done_at = ?, updated_at = ?
+            SET task_date = ?, title = ?, done = ?, done_at = ?, sort_order = ?, updated_at = ?
             WHERE id = ?
             """,
-            (task_date, title, done, done_at, now_iso(), current["id"]),
+            (task_date, title, done, done_at, sort_order, now_iso(), current["id"]),
         )
         updated = dict(conn.execute("SELECT * FROM tasks WHERE id = ?", (current["id"],)).fetchone())
     return task_out(updated)

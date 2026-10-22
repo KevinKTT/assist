@@ -51,6 +51,19 @@ export function IconDays() {
   )
 }
 
+export function IconGrip() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="9" cy="7" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="7" r="1.4" fill="currentColor" />
+      <circle cx="9" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="9" cy="17" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="17" r="1.4" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function IconChart() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">

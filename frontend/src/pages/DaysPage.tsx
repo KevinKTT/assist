@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Sheet, useApp } from '../app-context'
-import { IconDays } from '../icons'
+import { IconDays, IconGrip } from '../icons'
 import { addDays, formatDay, formatMonth, formatWeek, localDate, parseISODate, sundayOnOrBefore, weekday, weekdayShort } from '../format'
 import { db } from '../store/db'
-import { createTask, deleteTask, updateTask } from '../store/repository'
+import { createTask, deleteTask, reorderTasks, updateTask } from '../store/repository'
 import type { Task } from '../types'
 
 export function DaysPage() {
@@ -18,6 +18,7 @@ export function DaysPage() {
   const [quickProblem, setQuickProblem] = useState('')
   const [quickBusy, setQuickBusy] = useState(false)
   const start = useRef<{ x: number; y: number } | null>(null)
+  const grip = useRef(false)
   const tasks = useLiveQuery(() => db.tasks.toArray(), [], [] as Task[])
   const weekIso = localDate(weekStart)
   const days = Array.from({ length: 7 }, (_, i) => localDate(addDays(weekStart, i)))
@@ -81,6 +82,11 @@ export function DaysPage() {
       }}
       onTouchEnd={(e) => {
         if (!start.current) return
+        // A drag starts on a task handle. Don't treat that gesture as a week swipe.
+        if (grip.current) {
+          start.current = null
+          return
+        }
         const t = e.changedTouches[0]
         const dx = t.clientX - start.current.x
         const dy = t.clientY - start.current.y
@@ -130,22 +136,16 @@ export function DaysPage() {
                 <div className="num">{parseISODate(date).getDate()}</div>
               </div>
               <div>
-                {items.length === 0 && <p className="quiet">Nothing yet</p>}
-                {items.map((task) => (
-                  <div key={task.uid} className={task.done ? 'task done' : 'task'}>
-                    <button
-                      className={task.done ? 'check on' : 'check'}
-                      type="button"
-                      role="checkbox"
-                      aria-checked={task.done}
-                      aria-label={task.done ? `Mark not done: ${task.title}` : `Mark done: ${task.title}`}
-                      onClick={() => void toggle(task)}
-                    >
-                      {task.done ? '✓' : ''}
-                    </button>
-                    <button className="task-title" type="button" onClick={() => setSheet({ date, task })}>{task.title}</button>
-                  </div>
-                ))}
+                <TaskList
+                  date={date}
+                  tasks={items}
+                  variant="row"
+                  empty={<p className="quiet">Nothing yet</p>}
+                  onToggle={(task) => void toggle(task)}
+                  onEdit={(task) => setSheet({ date, task })}
+                  onGrip={(active) => { grip.current = active }}
+                  onError={(message) => toast(message)}
+                />
                 <button className="day-add" type="button" onClick={() => setSheet({ date })}>+ Add</button>
               </div>
             </section>
@@ -202,28 +202,16 @@ export function DaysPage() {
               {quickBusy ? 'Saving…' : 'Add task'}
             </button>
           </form>
-          <div className="agenda-tasks">
-            {tasks.filter((task) => task.date === selected).length === 0 && (
-              <p className="quiet">Nothing yet for this day.</p>
-            )}
-            {tasks.filter((task) => task.date === selected).map((task) => (
-              <div key={task.uid} className={task.done ? 'task-card done' : 'task-card'}>
-                <button
-                  className={task.done ? 'check on' : 'check'}
-                  type="button"
-                  role="checkbox"
-                  aria-checked={task.done}
-                  aria-label={task.done ? `Mark not done: ${task.title}` : `Mark done: ${task.title}`}
-                  onClick={() => void toggle(task)}
-                >
-                  {task.done ? '✓' : ''}
-                </button>
-                <button className="task-card-title" type="button" onClick={() => setSheet({ date: selected, task })}>
-                  {task.title}
-                </button>
-              </div>
-            ))}
-          </div>
+          <TaskList
+            date={selected}
+            tasks={tasks.filter((task) => task.date === selected)}
+            variant="card"
+            empty={<p className="quiet">Nothing yet for this day.</p>}
+            onToggle={(task) => void toggle(task)}
+            onEdit={(task) => setSheet({ date: selected, task })}
+            onGrip={(active) => { grip.current = active }}
+            onError={(message) => toast(message)}
+          />
         </section>
       </div>
       <div className="fab">
@@ -245,6 +233,224 @@ export function DaysPage() {
         }}
       />
     </main>
+  )
+}
+
+function tasksInOrder(tasks: Task[]): Task[] {
+  return tasks.slice().sort((a, b) => a.sort_order - b.sort_order || (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0))
+}
+
+function dropIndex(rows: HTMLElement[], from: number, clientY: number): number {
+  let target = from
+  for (let i = 0; i < rows.length; i++) {
+    if (i === from) continue
+    const rect = rows[i].getBoundingClientRect()
+    const mid = rect.top + rect.height / 2
+    if (i < from && clientY < mid) return i
+    if (i > from && clientY > mid) target = i
+  }
+  return target
+}
+
+function sameOrder(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((uid, index) => uid === b[index])
+}
+
+function TaskList({
+  date,
+  tasks,
+  variant,
+  empty,
+  onToggle,
+  onEdit,
+  onGrip,
+  onError,
+}: {
+  date: string
+  tasks: Task[]
+  variant: 'row' | 'card'
+  empty: React.ReactNode
+  onToggle: (task: Task) => void
+  onEdit: (task: Task) => void
+  onGrip: (active: boolean) => void
+  onError: (message: string) => void
+}) {
+  const listRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ uid: string; pointerId: number; startY: number; active: boolean; origin: string[] } | null>(null)
+  const orderRef = useRef<string[] | null>(null)
+  const tasksRef = useRef(tasks)
+  tasksRef.current = tasks
+  const [order, setOrder] = useState<string[] | null>(null)
+  const [dragUid, setDragUid] = useState<string | null>(null)
+  const sorted = useMemo(() => tasksInOrder(tasks), [tasks])
+  const shown = useMemo(() => {
+    if (!order) return sorted
+    const byUid = new Map(sorted.map((task) => [task.uid, task]))
+    const rows: Task[] = []
+    for (const uid of order) {
+      const task = byUid.get(uid)
+      if (task) rows.push(task)
+    }
+    for (const task of sorted) {
+      if (!order.includes(task.uid)) rows.push(task)
+    }
+    return rows
+  }, [order, sorted])
+  const shownRef = useRef(shown)
+  shownRef.current = shown
+
+  useEffect(() => {
+    if (dragRef.current || !orderRef.current) return
+    const ids = tasksInOrder(tasks).map((task) => task.uid)
+    if (sameOrder(ids, orderRef.current)) {
+      orderRef.current = null
+      setOrder(null)
+    }
+  }, [tasks])
+
+  function clearIfSynced() {
+    const pending = orderRef.current
+    if (!pending || dragRef.current) return
+    const ids = tasksInOrder(tasksRef.current).map((task) => task.uid)
+    if (sameOrder(ids, pending)) {
+      orderRef.current = null
+      setOrder(null)
+    }
+  }
+
+  async function save(next: string[]) {
+    try {
+      await reorderTasks(date, next)
+      clearIfSynced()
+    } catch (err) {
+      orderRef.current = null
+      setOrder(null)
+      onError(err instanceof Error ? err.message : 'Could not reorder')
+    }
+  }
+
+  function finish(commit: boolean) {
+    const drag = dragRef.current
+    if (!drag) return
+    dragRef.current = null
+    setDragUid(null)
+    onGrip(false)
+    const next = orderRef.current
+    if (!commit || !drag.active || !next || sameOrder(next, drag.origin)) {
+      orderRef.current = null
+      setOrder(null)
+      return
+    }
+    void save(next)
+  }
+
+  function place(uid: string, clientY: number) {
+    const list = listRef.current
+    if (!list) return
+    const rows = [...list.querySelectorAll<HTMLElement>('[data-task]')]
+    const current = rows.map((row) => row.dataset.task ?? '')
+    const from = current.indexOf(uid)
+    if (from < 0) return
+    const target = dropIndex(rows, from, clientY)
+    if (target === from) return
+    const next = current.slice()
+    next.splice(from, 1)
+    next.splice(target, 0, uid)
+    orderRef.current = next
+    setOrder(next)
+  }
+
+  function move(uid: string, direction: -1 | 1) {
+    if (dragRef.current) return
+    const ids = shownRef.current.map((task) => task.uid)
+    const from = ids.indexOf(uid)
+    const to = from + direction
+    if (from < 0 || to < 0 || to >= ids.length) return
+    const next = ids.slice()
+    next.splice(from, 1)
+    next.splice(to, 0, uid)
+    orderRef.current = next
+    setOrder(next)
+    void save(next)
+  }
+
+  function onPointerMove(event: React.PointerEvent) {
+    const drag = dragRef.current
+    if (!drag || event.pointerId !== drag.pointerId) return
+    if (!drag.active) {
+      if (Math.abs(event.clientY - drag.startY) < 5) return
+      drag.active = true
+      setDragUid(drag.uid)
+    }
+    event.preventDefault()
+    place(drag.uid, event.clientY)
+  }
+
+  return (
+    <div
+      className={variant === 'card' ? 'agenda-tasks' : undefined}
+      ref={listRef}
+      style={dragUid ? { touchAction: 'none' } : undefined}
+      onPointerMove={onPointerMove}
+      onPointerUp={(event) => {
+        if (dragRef.current?.pointerId === event.pointerId) finish(true)
+      }}
+      onPointerCancel={(event) => {
+        if (dragRef.current?.pointerId === event.pointerId) finish(false)
+      }}
+    >
+      {shown.length === 0 && empty}
+      {shown.map((task) => {
+        const titleClass = variant === 'card' ? 'task-card-title' : 'task-title'
+        const rowClass = [
+          variant === 'card' ? 'task-card' : 'task',
+          task.done ? 'done' : '',
+          dragUid === task.uid ? 'dragging' : '',
+        ].filter(Boolean).join(' ')
+        const label = task.title.replace(/\s+/g, ' ')
+        return (
+          <div key={task.uid} className={rowClass} data-task={task.uid}>
+            <button
+              className={task.done ? 'check on' : 'check'}
+              type="button"
+              role="checkbox"
+              aria-checked={task.done}
+              aria-label={task.done ? `Mark not done: ${label}` : `Mark done: ${label}`}
+              onClick={() => onToggle(task)}
+            >
+              {task.done ? '✓' : ''}
+            </button>
+            <button className={titleClass} type="button" onClick={() => onEdit(task)}>{task.title}</button>
+            <button
+              className="grip"
+              type="button"
+              aria-label={`Reorder ${label}`}
+              aria-keyshortcuts="ArrowUp ArrowDown"
+              onPointerDown={(event) => {
+                if (event.button !== 0) return
+                onGrip(true)
+                dragRef.current = {
+                  uid: task.uid,
+                  pointerId: event.pointerId,
+                  startY: event.clientY,
+                  active: false,
+                  origin: shownRef.current.map((item) => item.uid),
+                }
+                // Capture on the list, which stays put while the rows reorder.
+                listRef.current?.setPointerCapture(event.pointerId)
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+                event.preventDefault()
+                move(task.uid, event.key === 'ArrowUp' ? -1 : 1)
+              }}
+            >
+              <IconGrip />
+            </button>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 

@@ -164,7 +164,13 @@ export function buildReport(
   const expenses = sumAmounts(spent.map((row) => row.amount))
   const a = localDate(start)
   const b = localDate(end)
-  const tasks = taskRows.filter((row) => a <= row.date && row.date <= b)
+  const tasks = taskRows
+    .filter((row) => a <= row.date && row.date <= b)
+    .sort((left, right) => {
+      if (left.date !== right.date) return left.date < right.date ? -1 : 1
+      if (left.sort_order !== right.sort_order) return left.sort_order - right.sort_order
+      return left.id - right.id
+    })
   const inRange = payouts.filter((row) => a <= row.paid_on && row.paid_on <= b)
   return {
     name: settings.display_name,

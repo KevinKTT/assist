@@ -208,6 +208,42 @@ export async function deleteExpense(uid: string): Promise<void> {
 
 // Tasks -----------------------------------------------------------------
 
+function taskCreateBody(task: Task) {
+  return { task_date: task.date, title: task.title, uid: task.uid, sort_order: task.sort_order }
+}
+
+function taskPatchBody(task: Task) {
+  return { task_date: task.date, title: task.title, done: task.done, sort_order: task.sort_order }
+}
+
+// A reorder touches several tasks at once, and a task may already have a
+// create or edit waiting. Refresh that queued write instead of stacking
+// another one behind it.
+async function queueTask(task: Task, rejected: boolean): Promise<void> {
+  const pending = await db.outbox.where('uid').equals(task.uid).toArray()
+  const post = [...pending].reverse().find((op) => op.method === 'POST')
+  const patches = pending.filter((op) => op.method === 'PATCH')
+  if (post) await db.outbox.update(post.seq!, { body: taskCreateBody(task) })
+  for (const op of patches) await db.outbox.update(op.seq!, { body: taskPatchBody(task) })
+  if (rejected) {
+    if (!post) {
+      await db.outbox.add({ method: 'POST', path: '/api/tasks', body: taskCreateBody(task), uid: task.uid, label: 'task' })
+    }
+    return
+  }
+  if (patches.length > 0) return
+  // A waiting create already carries the title, day, and order. Done is not
+  // part of create, so a finished task still needs a patch after it.
+  if (post && !task.done) return
+  await db.outbox.add({
+    method: 'PATCH',
+    path: `/api/tasks/${task.uid}`,
+    body: taskPatchBody(task),
+    uid: task.uid,
+    label: 'task',
+  })
+}
+
 export async function createTask(input: { date: string; title: string }): Promise<void> {
   const uid = newUid()
   const siblings = await db.tasks.where('date').equals(input.date).toArray()
@@ -218,7 +254,7 @@ export async function createTask(input: { date: string; title: string }): Promis
     await enqueue({
       method: 'POST',
       path: '/api/tasks',
-      body: { task_date: input.date, title: input.title, uid },
+      body: taskCreateBody(task),
       uid,
       label: 'task',
     }, false)
@@ -229,23 +265,55 @@ export async function createTask(input: { date: string; title: string }): Promis
 export async function updateTask(uid: string, input: { date?: string; title?: string; done?: boolean }): Promise<void> {
   const existing = await db.tasks.get(uid)
   if (!existing) return
+  let sortOrder = existing.sort_order
+  if (input.date !== undefined && input.date !== existing.date) {
+    const siblings = await db.tasks.where('date').equals(input.date).toArray()
+    sortOrder = siblings.reduce((max, task) => Math.max(max, task.sort_order), 0) + 1
+  }
   const next: Task = {
     ...existing,
     date: input.date ?? existing.date,
     title: input.title ?? existing.title,
     done: input.done ?? existing.done,
     done_at: input.done === undefined ? existing.done_at : input.done ? new Date().toISOString() : null,
+    sort_order: sortOrder,
   }
   const rejected = await wasRejected(uid)
   await db.transaction('rw', db.tasks, db.outbox, db.meta, async () => {
     await db.tasks.put(next)
     if (rejected) await removeRejectedUid(uid)
-    await enqueue(
-      rejected
-        ? { method: 'POST', path: '/api/tasks', body: { task_date: next.date, title: next.title, uid }, uid, label: 'task' }
-        : { method: 'PATCH', path: `/api/tasks/${uid}`, body: { task_date: next.date, title: next.title, done: next.done }, uid, label: 'task' },
-      false,
-    )
+    await queueTask(next, rejected)
+  })
+  kick()
+}
+
+export async function reorderTasks(date: string, orderedUids: string[]): Promise<void> {
+  const siblings = await db.tasks.where('date').equals(date).toArray()
+  const byUid = new Map(siblings.map((task) => [task.uid, task]))
+  const seen = new Set<string>()
+  const ordered: Task[] = []
+  for (const uid of orderedUids) {
+    const task = byUid.get(uid)
+    if (!task || seen.has(uid)) continue
+    seen.add(uid)
+    ordered.push(task)
+  }
+  const rest = siblings
+    .filter((task) => !seen.has(task.uid))
+    .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+  ordered.push(...rest)
+  const changed = ordered.flatMap((task, index) => {
+    const sortOrder = index + 1
+    return task.sort_order === sortOrder ? [] : [{ ...task, sort_order: sortOrder }]
+  })
+  if (!changed.length) return
+  await db.transaction('rw', db.tasks, db.outbox, db.meta, async () => {
+    for (const task of changed) {
+      await db.tasks.put(task)
+      const rejected = await wasRejected(task.uid)
+      if (rejected) await removeRejectedUid(task.uid)
+      await queueTask(task, rejected)
+    }
   })
   kick()
 }

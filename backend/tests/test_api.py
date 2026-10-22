@@ -256,6 +256,34 @@ def test_timer_and_short_discard(tmp_path):
         assert client.get("/api/time/running").json()["running"] is None
 
 
+def test_reorder_tasks_within_a_day(tmp_path):
+    with make_client(tmp_path) as client:
+        first = client.post("/api/tasks", json={"task_date": "2026-03-11", "title": "Call school"}).json()
+        second = client.post("/api/tasks", json={"task_date": "2026-03-11", "title": "Pack lunch"}).json()
+        third = client.post("/api/tasks", json={"task_date": "2026-03-11", "title": "Email"}).json()
+        assert [first["sort_order"], second["sort_order"], third["sort_order"]] == [1, 2, 3]
+
+        placed = client.post("/api/tasks", json={"task_date": "2026-03-11", "title": "Pinned", "sort_order": 8})
+        assert placed.status_code == 200
+        assert placed.json()["sort_order"] == 8
+
+        bad = client.patch(f"/api/tasks/{first['uid']}", json={"sort_order": 0})
+        assert bad.status_code == 400
+
+        assert client.patch(f"/api/tasks/{third['uid']}", json={"sort_order": 1}).status_code == 200
+        assert client.patch(f"/api/tasks/{first['uid']}", json={"sort_order": 2}).status_code == 200
+        assert client.patch(f"/api/tasks/{second['uid']}", json={"sort_order": 3}).status_code == 200
+        day = client.get("/api/tasks", params={"start": "2026-03-11", "end": "2026-03-11"}).json()
+        assert [row["title"] for row in day] == ["Email", "Call school", "Pack lunch", "Pinned"]
+
+        client.post("/api/tasks", json={"task_date": "2026-03-12", "title": "Already there"})
+        moved = client.patch(f"/api/tasks/{third['uid']}", json={"task_date": "2026-03-12"})
+        assert moved.status_code == 200
+        assert moved.json()["sort_order"] == 2
+        next_day = client.get("/api/tasks", params={"start": "2026-03-12", "end": "2026-03-12"}).json()
+        assert [row["title"] for row in next_day] == ["Already there", "Email"]
+
+
 def test_adjust_running_start(tmp_path):
     with make_client(tmp_path) as client:
         now = datetime.now(timezone.utc).replace(microsecond=0)
