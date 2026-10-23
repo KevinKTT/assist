@@ -28,7 +28,8 @@ export function ReportsPage() {
   const payoutRows = useLiveQuery(() => db.payouts.toArray(), [], [])
 
   const data = useMemo(() => {
-    if (preset === 'custom' && !range) return null
+    // An unfinished custom range must not blank the page. The chart and
+    // export buttons wait until both dates are present and in order.
     const todayDate = parseISODate(today)
     return buildDashboard(
       settings,
@@ -41,7 +42,7 @@ export function ReportsPage() {
       range ? parseISODate(range.start) : undefined,
       range ? parseISODate(range.end) : undefined,
     )
-  }, [settings, today, preset, range?.start, range?.end, timeEntries, mileEntries, payoutRows, taskRows, expenseEntries])
+  }, [settings, today, range?.start, range?.end, timeEntries, mileEntries, payoutRows, taskRows, expenseEntries])
 
   function report() {
     if (!data) return null
@@ -85,7 +86,6 @@ export function ReportsPage() {
     ? (data ? { start: data.period.start, end: data.period.end } : null)
     : range
   const chartReady = Boolean(data && expected && data.range.start === expected.start && data.range.end === expected.end)
-  if (!data) return <main className="screen"><div className="skeleton" /></main>
   const weekTotal = data.week.tasks_done + data.week.tasks_open
   const cols = chartColumns(data.range.series)
   const maxHours = Math.max(...cols.map((col) => col.hours), 0)
