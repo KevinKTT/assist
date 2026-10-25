@@ -1,4 +1,4 @@
-import { addDays, sundayOnOrBefore } from '../format'
+import { addDays, mondayOnOrBefore } from '../format'
 import type { Cycle } from '../types'
 
 // Mirrors backend/app/periods.py.
@@ -26,7 +26,7 @@ export function daysBetween(a: Date, b: Date): number {
 }
 
 export function weekContaining(day: Date): [Date, Date] {
-  const start = sundayOnOrBefore(day)
+  const start = mondayOnOrBefore(day)
   return [start, addDays(start, 6)]
 }
 

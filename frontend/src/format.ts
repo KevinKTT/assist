@@ -21,8 +21,15 @@ export function addDays(d: Date, n: number): Date {
   return next
 }
 
-export function sundayOnOrBefore(d: Date): Date {
-  return addDays(d, -d.getDay())
+// Weeks in To Do, and the week a report can cover, run Monday through Sunday.
+export function mondayOnOrBefore(d: Date): Date {
+  return addDays(d, -((d.getDay() + 6) % 7))
+}
+
+// Reports tab only. A workday is a day with hours logged in the pay period.
+export function workdayAverage(hours: number, daysWorked: number): string {
+  if (daysWorked <= 0) return 'None yet'
+  return hoursText(hours / daysWorked)
 }
 
 export function weekday(iso: string): string {

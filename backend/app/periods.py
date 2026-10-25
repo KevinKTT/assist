@@ -21,8 +21,12 @@ def sunday_on_or_before(day: date) -> date:
     return day - timedelta(days=(day.weekday() + 1) % 7)
 
 
+def monday_on_or_before(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
 def week_containing(day: date) -> tuple[date, date]:
-    start = sunday_on_or_before(day)
+    start = monday_on_or_before(day)
     return start, start + timedelta(days=6)
 
 

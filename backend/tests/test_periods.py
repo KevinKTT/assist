@@ -1,6 +1,13 @@
 from datetime import date
 
-from app.periods import month_bounds, period_containing, previous_period, sunday_on_or_before, week_containing
+from app.periods import (
+    monday_on_or_before,
+    month_bounds,
+    period_containing,
+    previous_period,
+    sunday_on_or_before,
+    week_containing,
+)
 
 
 def test_biweekly_from_anchor():
@@ -39,6 +46,13 @@ def test_previous_month():
     assert end == date(2026, 2, 28)
 
 
-def test_week_starts_sunday():
+def test_new_pay_period_anchor_stays_sunday():
     assert sunday_on_or_before(date(2026, 3, 10)) == date(2026, 3, 8)
-    assert week_containing(date(2026, 3, 8)) == (date(2026, 3, 8), date(2026, 3, 14))
+
+
+def test_week_starts_monday():
+    tuesday = date(2026, 3, 10)
+    assert monday_on_or_before(tuesday) == date(2026, 3, 9)
+    assert monday_on_or_before(date(2026, 3, 9)) == date(2026, 3, 9)
+    assert monday_on_or_before(date(2026, 3, 15)) == date(2026, 3, 9)
+    assert week_containing(tuesday) == (date(2026, 3, 9), date(2026, 3, 15))

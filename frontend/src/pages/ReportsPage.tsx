@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { downloadFile } from '../api'
 import { Sheet, useApp } from '../app-context'
-import { addDays, formatDay, formatPeriod, hoursText, localDate, milesText, money, parseISODate, sundayOnOrBefore } from '../format'
+import { addDays, formatDay, formatPeriod, hoursText, localDate, milesText, mondayOnOrBefore, money, parseISODate, workdayAverage } from '../format'
 import { downloadCsv, renderCsv } from '../domain/csv'
 import { buildReport, dashboard as buildDashboard } from '../domain/summary'
 import { db } from '../store/db'
@@ -116,6 +116,7 @@ export function ReportsPage() {
         <Stat label="Mileage pay" value={money(data.period.mileage_pay)} />
         <Stat label="Expenses" value={money(data.period.expenses)} />
         <Stat label="Hours" value={hoursText(data.period.hours)} />
+        <Stat label="Avg per workday" value={workdayAverage(data.period.hours, data.period.days_worked)} />
         <Stat label="Miles" value={milesText(data.period.miles)} />
         <Stat label="Tasks this week" value={weekTotal ? `${data.week.tasks_done} of ${weekTotal}` : 'None yet'} />
         <Stat label="Open today" value={String(data.today.tasks_open)} />
@@ -406,7 +407,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 function bounds(preset: Preset, today: string, customStart: string, customEnd: string) {
   const d = parseISODate(today)
   if (preset === 'week') {
-    const start = sundayOnOrBefore(d)
+    const start = mondayOnOrBefore(d)
     return { start: localDate(start), end: localDate(addDays(start, 6)) }
   }
   if (preset === 'month') {

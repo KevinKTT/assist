@@ -2,14 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Sheet, useApp } from '../app-context'
 import { IconDays, IconGrip } from '../icons'
-import { addDays, formatDay, formatMonth, formatWeek, localDate, parseISODate, sundayOnOrBefore, weekday, weekdayShort } from '../format'
+import { addDays, formatDay, formatMonth, formatWeek, localDate, mondayOnOrBefore, parseISODate, weekday, weekdayShort } from '../format'
 import { db } from '../store/db'
 import { createTask, deleteTask, reorderTasks, updateTask } from '../store/repository'
 import type { Task } from '../types'
 
 export function DaysPage() {
   const { today, toast } = useApp()
-  const [weekStart, setWeekStart] = useState(() => sundayOnOrBefore(parseISODate(today)))
+  const [weekStart, setWeekStart] = useState(() => mondayOnOrBefore(parseISODate(today)))
   const [calOpen, setCalOpen] = useState(false)
   const [cursor, setCursor] = useState(() => new Date())
   const [sheet, setSheet] = useState<{ date: string; task?: Task } | null>(null)
@@ -22,7 +22,7 @@ export function DaysPage() {
   const tasks = useLiveQuery(() => db.tasks.toArray(), [], [] as Task[])
   const weekIso = localDate(weekStart)
   const days = Array.from({ length: 7 }, (_, i) => localDate(addDays(weekStart, i)))
-  const thisWeek = localDate(sundayOnOrBefore(parseISODate(today))) === weekIso
+  const thisWeek = localDate(mondayOnOrBefore(parseISODate(today))) === weekIso
 
   // Desktop agenda shows one day at a time; keep the selection inside the
   // displayed week when navigating.
@@ -68,7 +68,7 @@ export function DaysPage() {
   }
 
   function pick(date: string) {
-    setWeekStart(sundayOnOrBefore(parseISODate(date)))
+    setWeekStart(mondayOnOrBefore(parseISODate(date)))
     setSelected(date)
     setCalOpen(false)
   }
@@ -113,7 +113,7 @@ export function DaysPage() {
         </button>
       </div>
       {!thisWeek && (
-        <button className="text-btn" type="button" onClick={() => setWeekStart(sundayOnOrBefore(parseISODate(today)))}>
+        <button className="text-btn" type="button" onClick={() => setWeekStart(mondayOnOrBefore(parseISODate(today)))}>
           Back to today
         </button>
       )}
@@ -468,7 +468,7 @@ function Calendar({
   onPick: (date: string) => void
 }) {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
-  const gridStart = addDays(first, -first.getDay())
+  const gridStart = mondayOnOrBefore(first)
   const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i))
   const week = localDate(weekStart)
   return (
@@ -479,7 +479,7 @@ function Calendar({
         <button className="round" type="button" aria-label="Next month" onClick={() => onCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}>›</button>
       </div>
       <div className="cal-grid">
-        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((label, i) => <div key={`${label}-${i}`} className="dow">{label}</div>)}
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((label, i) => <div key={`${label}-${i}`} className="dow">{label}</div>)}
         {cells.map((day) => {
           const iso = localDate(day)
           const inWeek = iso >= week && iso <= localDate(addDays(weekStart, 6))

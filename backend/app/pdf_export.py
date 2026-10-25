@@ -1,4 +1,4 @@
-import math
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -65,21 +65,27 @@ def need(pdf: AssistPDF, height: float) -> None:
         pdf.add_page()
 
 
-def flower(pdf: AssistPDF, x: float, y: float, size: float) -> None:
-    pdf.set_fill_color(*BLUSH)
-    petal = size * 0.34
-    orbit = size * 0.28
-    for i in range(5):
-        ang = math.radians(-90 + i * 72)
-        px = x + math.cos(ang) * orbit
-        py = y + math.sin(ang) * orbit
-        pdf.ellipse(px - petal, py - petal, petal * 2, petal * 2, style="F")
-    pdf.set_fill_color(*CREAM)
-    core = size * 0.16
-    pdf.ellipse(x - core, y - core, core * 2, core * 2, style="F")
-    pdf.set_fill_color(*ROSE_DEEP)
-    dot = size * 0.07
-    pdf.ellipse(x - dot, y - dot, dot * 2, dot * 2, style="F")
+def bow_logo() -> Path:
+    candidates: list[Path] = []
+    static = os.environ.get("ASSIST_STATIC_DIR")
+    if static:
+        candidates.append(Path(static) / "logo.png")
+    repo = Path(__file__).resolve().parents[2]
+    candidates.append(repo / "frontend" / "public" / "logo.png")
+    candidates.append(Path(__file__).resolve().parent.parent / "static" / "logo.png")
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise FileNotFoundError("Could not find the bow logo")
+
+
+def bow(pdf: AssistPDF) -> None:
+    # Top-right corner. The mark is taller than it is wide, so the tails
+    # sit in the margin beside the title instead of on top of it.
+    y = pdf.get_y()
+    width = 26
+    pdf.image(bow_logo(), x=210 - 12 - width, y=8, w=width)
+    pdf.set_y(y)
 
 
 def section(pdf: AssistPDF, title: str) -> None:
@@ -143,7 +149,7 @@ def render_pdf(report: dict, tasks: str = "detail") -> bytes:
     pdf.set_author(pdf_text(report["name"]) or "assist")
     pdf.set_creator("assist")
     pdf.add_page()
-    flower(pdf, 182, 24, 16)
+    bow(pdf)
     pdf.set_font("Fraunces", "I", 28)
     pdf.set_text_color(*ROSE_DEEP)
     pdf.cell(0, 12, "assist", new_x="LMARGIN", new_y="NEXT")
