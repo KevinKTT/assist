@@ -187,6 +187,9 @@ h2 { font-family: var(--display); font-weight: 600; }
   gap: 8px;
   margin: 14px 0 4px;
 }
+.pager button:disabled { opacity: 0.35; }
+.hero .pager { margin-top: 0; }
+.cycle-back { display: block; margin: 2px auto 0; }
 .pager button, .round {
   width: 42px;
   height: 42px;
