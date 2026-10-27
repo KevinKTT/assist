@@ -203,9 +203,13 @@ export function dashboard(
   today: Date,
   rangeStart?: Date,
   rangeEnd?: Date,
+  periodOn?: Date,
 ) {
   const anchor = parseISODate(settings.cycle_anchor)
-  const [periodStart, periodEnd] = periodContaining(today, anchor, settings.cycle)
+  const [, currentEnd] = periodContaining(today, anchor, settings.cycle)
+  // A requested day past the current cycle stays on the cycle that contains today.
+  const focus = periodOn && periodOn <= currentEnd ? periodOn : today
+  const [periodStart, periodEnd] = periodContaining(focus, anchor, settings.cycle)
   const start = rangeStart ?? periodStart
   const end = rangeEnd ?? periodEnd
   const payouts = payoutIndex(payoutRows)

@@ -4,6 +4,7 @@ import { downloadFile } from '../api'
 import { Sheet, useApp } from '../app-context'
 import { addDays, formatDay, formatPeriod, hoursText, localDate, milesText, mondayOnOrBefore, money, parseISODate, workdayAverage } from '../format'
 import { downloadCsv, renderCsv } from '../domain/csv'
+import { nextPeriod, periodContaining, previousPeriod } from '../domain/periods'
 import { buildReport, dashboard as buildDashboard } from '../domain/summary'
 import { db } from '../store/db'
 import { createExpense, createPayout, deleteExpense, deletePayout, updateExpense } from '../store/repository'
@@ -19,7 +20,19 @@ export function ReportsPage() {
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [busy, setBusy] = useState<'csv' | 'pdf' | 'summary' | null>(null)
+  // null follows the cycle that contains today. A date opens that earlier cycle.
+  const [cycleOn, setCycleOn] = useState<string | null>(null)
   const range = bounds(preset, today, customStart, customEnd)
+  const anchor = parseISODate(settings.cycle_anchor)
+  const todayDate = parseISODate(today)
+  const [currentStart, currentEnd] = periodContaining(todayDate, anchor, settings.cycle)
+  const requested = cycleOn ? parseISODate(cycleOn) : todayDate
+  const focus = requested > currentEnd ? todayDate : requested
+  const [viewStart, viewEnd] = periodContaining(focus, anchor, settings.cycle)
+  const viewingCurrent = localDate(viewStart) === localDate(currentStart)
+  const [prevStart] = previousPeriod(viewStart, anchor, settings.cycle)
+  const [nextStart] = nextPeriod(viewEnd, anchor, settings.cycle)
+  const viewKey = localDate(viewStart)
 
   const timeEntries = useLiveQuery(() => db.time_entries.toArray(), [], [])
   const mileEntries = useLiveQuery(() => db.mileage_entries.toArray(), [], [])
@@ -30,7 +43,6 @@ export function ReportsPage() {
   const data = useMemo(() => {
     // An unfinished custom range must not blank the page. The chart and
     // export buttons wait until both dates are present and in order.
-    const todayDate = parseISODate(today)
     return buildDashboard(
       settings,
       timeEntries,
@@ -38,11 +50,12 @@ export function ReportsPage() {
       payoutRows,
       taskRows,
       expenseEntries,
-      todayDate,
+      parseISODate(today),
       range ? parseISODate(range.start) : undefined,
       range ? parseISODate(range.end) : undefined,
+      parseISODate(viewKey),
     )
-  }, [settings, today, range?.start, range?.end, timeEntries, mileEntries, payoutRows, taskRows, expenseEntries])
+  }, [settings, today, viewKey, range?.start, range?.end, timeEntries, mileEntries, payoutRows, taskRows, expenseEntries])
 
   function report() {
     if (!data) return null
@@ -82,6 +95,12 @@ export function ReportsPage() {
     }
   }
 
+  function showPeriod(start: Date) {
+    setPayOpen(false)
+    if (localDate(start) === localDate(currentStart)) setCycleOn(null)
+    else setCycleOn(localDate(start))
+  }
+
   const expected = preset === 'period'
     ? (data ? { start: data.period.start, end: data.period.end } : null)
     : range
@@ -96,9 +115,18 @@ export function ReportsPage() {
     <main className="screen">
       <h1>Reports</h1>
       <section className="hero">
-        <p className="eyebrow">This pay period</p>
+        <div className="pager">
+          <button className="round" type="button" aria-label="Previous pay period" onClick={() => showPeriod(prevStart)}>‹</button>
+          <div className="pager-label">
+            <p className="eyebrow">{viewingCurrent ? 'This pay period' : 'Earlier pay period'}</p>
+            <strong>{formatPeriod(data.period.start, data.period.end)}</strong>
+          </div>
+          <button className="round" type="button" aria-label="Next pay period" disabled={nextStart > currentStart} onClick={() => showPeriod(nextStart)}>›</button>
+        </div>
+        {!viewingCurrent && (
+          <button className="text-btn cycle-back" type="button" onClick={() => showPeriod(currentStart)}>Back to this pay period</button>
+        )}
         <div className="money">{money(data.period.combined)}</div>
-        <p>{formatPeriod(data.period.start, data.period.end)}</p>
         <p className="sub">
           {hoursText(data.period.hours)} · {milesText(data.period.miles)} · {money(data.period.expenses)} expenses
         </p>
@@ -243,6 +271,14 @@ function PaySheet({
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    setPaidOn(today)
+    setNote('')
+    setBusy(false)
+    setProblem('')
+  }, [open, today, period.start, period.end])
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
