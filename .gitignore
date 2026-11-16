@@ -9,3 +9,4 @@ data/
 backups/
 *.db
 .DS_Store
+AGENTS.md

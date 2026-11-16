@@ -139,6 +139,48 @@ def test_mark_paid_covers_hours_and_miles(tmp_path):
         assert paid.json()["expenses"]["amount"] == 0
 
 
+def test_marking_an_earlier_period_paid_leaves_current_period_alone(tmp_path):
+    with make_client(tmp_path) as client:
+        today = "2026-03-20"
+        client.put("/api/settings", params={"today": today}, json={
+            "display_name": "",
+            "hourly_rate": 20,
+            "mileage_rate": 0.5,
+            "cycle": "biweekly",
+            "cycle_anchor": "2026-03-02",
+            "payday_offset_days": None,
+        })
+        client.post("/api/time", json={"work_date": "2026-03-03", "hours": 8, "note": "old period"})
+        client.post("/api/time", json={"work_date": "2026-03-17", "hours": 2, "note": "current period"})
+
+        earlier = client.get("/api/periods", params={"today": today, "start": "2026-03-03"}).json()
+        assert earlier["start"] == "2026-03-02"
+        assert earlier["end"] == "2026-03-15"
+        assert earlier["hours"] == 8
+
+        paid = client.post("/api/payouts", json={
+            "kind": "both",
+            "period_start": earlier["start"],
+            "period_end": earlier["end"],
+            "paid_on": "2026-03-19",
+            "note": "late pay",
+        })
+        assert paid.status_code == 200
+
+        current = client.get("/api/dashboard", params={"today": today}).json()
+        assert current["period"]["start"] == "2026-03-16"
+        assert current["period"]["end"] == "2026-03-29"
+        assert current["period"]["hours"] == 2
+        assert current["period"]["hours_payout"] is None
+        assert current["period"]["mileage_payout"] is None
+        assert current["period"]["expenses_payout"] is None
+
+        still_earlier = client.get("/api/periods", params={"today": today, "start": "2026-03-03"}).json()
+        assert still_earlier["hours_payout"]["amount"] == 160
+        assert still_earlier["mileage_payout"]["amount"] == 0
+        assert still_earlier["expenses_payout"]["amount"] == 0
+
+
 def test_expenses_roll_into_pay_and_exports(tmp_path):
     with make_client(tmp_path) as client:
         today = "2026-03-10"

@@ -5,7 +5,7 @@ import { Sheet, useApp } from '../app-context'
 import { addDays, formatDay, formatPeriod, hoursText, localDate, milesText, mondayOnOrBefore, money, parseISODate, workdayAverage } from '../format'
 import { downloadCsv, renderCsv } from '../domain/csv'
 import { nextPeriod, periodContaining, previousPeriod } from '../domain/periods'
-import { buildReport, dashboard as buildDashboard } from '../domain/summary'
+import { buildReport, dashboard as buildDashboard, payoutIndex, summarize } from '../domain/summary'
 import { db } from '../store/db'
 import { createExpense, createPayout, deleteExpense, deletePayout, updateExpense } from '../store/repository'
 import type { ExpenseEntry, SeriesPoint } from '../types'
@@ -33,6 +33,8 @@ export function ReportsPage() {
   const [prevStart] = previousPeriod(viewStart, anchor, settings.cycle)
   const [nextStart] = nextPeriod(viewEnd, anchor, settings.cycle)
   const viewKey = localDate(viewStart)
+  const currentStartIso = localDate(currentStart)
+  const currentEndIso = localDate(currentEnd)
 
   const timeEntries = useLiveQuery(() => db.time_entries.toArray(), [], [])
   const mileEntries = useLiveQuery(() => db.mileage_entries.toArray(), [], [])
@@ -56,6 +58,30 @@ export function ReportsPage() {
       parseISODate(viewKey),
     )
   }, [settings, today, viewKey, range?.start, range?.end, timeEntries, mileEntries, payoutRows, taskRows, expenseEntries])
+
+  const previousCycle = useMemo(() => {
+    const [start, end] = previousPeriod(
+      parseISODate(currentStartIso),
+      parseISODate(settings.cycle_anchor),
+      settings.cycle,
+    )
+    const summary = summarize(
+      start,
+      end,
+      settings,
+      timeEntries,
+      mileEntries,
+      payoutIndex(payoutRows),
+      parseISODate(today),
+      expenseEntries,
+    )
+    return {
+      start: localDate(start),
+      end: localDate(end),
+      summary,
+      hasActivity: summary.hours > 0 || summary.miles > 0 || summary.expenses > 0,
+    }
+  }, [settings, currentStartIso, today, timeEntries, mileEntries, payoutRows, expenseEntries])
 
   function report() {
     if (!data) return null
@@ -97,10 +123,13 @@ export function ReportsPage() {
 
   function showPeriod(start: Date) {
     setPayOpen(false)
+    setExpenseSheet(null)
+    setPreset('period')
     if (localDate(start) === localDate(currentStart)) setCycleOn(null)
     else setCycleOn(localDate(start))
   }
 
+  const showPreviousUnpaid = viewingCurrent && previousCycle.hasActivity && !isPaid(previousCycle.summary)
   const expected = preset === 'period'
     ? (data ? { start: data.period.start, end: data.period.end } : null)
     : range
@@ -114,7 +143,7 @@ export function ReportsPage() {
   return (
     <main className="screen">
       <h1>Reports</h1>
-      <section className="hero">
+      <section className={viewingCurrent ? 'hero' : 'hero past-cycle'}>
         <div className="pager">
           <button className="round" type="button" aria-label="Previous pay period" onClick={() => showPeriod(prevStart)}>‹</button>
           <div className="pager-label">
@@ -124,7 +153,14 @@ export function ReportsPage() {
           <button className="round" type="button" aria-label="Next pay period" disabled={nextStart > currentStart} onClick={() => showPeriod(nextStart)}>›</button>
         </div>
         {!viewingCurrent && (
-          <button className="text-btn cycle-back" type="button" onClick={() => showPeriod(currentStart)}>Back to this pay period</button>
+          <div className="cycle-notice inside" role="status">
+            <p className="eyebrow">Viewing an earlier pay period</p>
+            <p>
+              You are viewing {formatPeriod(data.period.start, data.period.end)}.
+              {' '}The current pay period is {formatPeriod(currentStartIso, currentEndIso)}.
+            </p>
+            <button className="text-btn" type="button" onClick={() => showPeriod(currentStart)}>Back to current period</button>
+          </div>
         )}
         <div className="money">{money(data.period.combined)}</div>
         <p className="sub">
@@ -139,6 +175,17 @@ export function ReportsPage() {
           </button>
         </div>
       </section>
+      {showPreviousUnpaid && (
+        <div className="cycle-notice" role="status">
+          <p className="eyebrow">Previous pay period</p>
+          <p>
+            {formatPeriod(previousCycle.start, previousCycle.end)} is not fully marked paid yet.
+          </p>
+          <button className="text-btn" type="button" onClick={() => showPeriod(parseISODate(previousCycle.start))}>
+            Review previous period
+          </button>
+        </div>
+      )}
       <div className="stat-grid">
         <Stat label="Hours pay" value={money(data.period.hours_pay)} />
         <Stat label="Mileage pay" value={money(data.period.mileage_pay)} />
@@ -177,7 +224,9 @@ export function ReportsPage() {
       <section className="expenses">
         <div className="month-head">
           <h2>Expenses</h2>
-          <button className="text-btn" type="button" onClick={() => setExpenseSheet({ type: 'add' })}>Add</button>
+          {viewingCurrent && (
+            <button className="text-btn" type="button" onClick={() => setExpenseSheet({ type: 'add' })}>Add</button>
+          )}
         </div>
         {!chartReady && preset === 'custom' && <p className="quiet">Pick a start and end.</p>}
         {!chartReady && preset !== 'custom' && <div className="skeleton" />}
@@ -185,11 +234,23 @@ export function ReportsPage() {
           <p className="quiet">Nothing to reimburse in this range yet.</p>
         )}
         {chartReady && data.range.expense_entries.map((item) => (
-          <button key={item.uid} className="entry today-entry" type="button" onClick={() => setExpenseSheet({ type: 'edit', entry: item })}>
-            <span className="entry-note">{formatDay(item.date)} · {item.note}</span>
-            <span className="entry-pay">{money(item.amount)}</span>
-          </button>
+          viewingCurrent ? (
+            <button key={item.uid} className="entry today-entry" type="button" onClick={() => setExpenseSheet({ type: 'edit', entry: item })}>
+              <span className="entry-note">{formatDay(item.date)} · {item.note}</span>
+              <span className="entry-pay">{money(item.amount)}</span>
+            </button>
+          ) : (
+            <div key={item.uid} className="entry today-entry">
+              <span className="entry-note">{formatDay(item.date)} · {item.note}</span>
+              <span className="entry-pay">{money(item.amount)}</span>
+            </div>
+          )
         ))}
+        {!viewingCurrent && chartReady && (
+          <p className="help">
+            Earlier pay periods are read-only here. To correct an old entry, open History on Hours, Miles, or Expenses.
+          </p>
+        )}
       </section>
       <section className="chart">
         {!chartReady && preset === 'custom' && <p className="quiet">Pick a start and end.</p>}
@@ -234,6 +295,7 @@ export function ReportsPage() {
         open={payOpen}
         today={today}
         period={data.period}
+        isCurrent={viewingCurrent}
         onClose={() => setPayOpen(false)}
         onDone={(message) => {
           setPayOpen(false)
@@ -257,12 +319,14 @@ function PaySheet({
   open,
   today,
   period,
+  isCurrent,
   onClose,
   onDone,
 }: {
   open: boolean
   today: string
   period: ReturnType<typeof buildDashboard>['period']
+  isCurrent: boolean
   onClose: () => void
   onDone: (message: string) => void
 }) {
@@ -304,18 +368,24 @@ function PaySheet({
     }
   }
 
+  const scopeNote = isCurrent
+    ? 'This records payouts for the current pay period. Its entries are not changed.'
+    : 'This records payouts only for this earlier pay period. The current pay period and its entries stay unchanged.'
+
   return (
-    <Sheet open={open} title={paid ? 'Paid' : 'Mark paid'} onClose={onClose}>
+    <Sheet open={open} title={`${paid ? 'Paid' : 'Mark paid'} — ${formatPeriod(period.start, period.end)}`} onClose={onClose}>
       {paid ? (
         <div>
           <p className="money">{money(period.combined)}</p>
           <p>Hours, miles, and expenses, paid {formatDay(period.hours_payout?.paid_on || period.mileage_payout?.paid_on || period.expenses_payout?.paid_on || today)}</p>
+          <p className="help">{scopeNote}</p>
           {problem && <p className="mismatch">{problem}</p>}
           <button className="danger" type="button" disabled={busy} onClick={() => void undo()}>Undo paid</button>
         </div>
       ) : (
         <form onSubmit={save}>
           <p>This saves {money(period.hours_pay)} in hours, {money(period.mileage_pay)} in miles, and {money(period.expenses)} in expenses.</p>
+          <p className="help">{scopeNote}</p>
           <label className="field">
             <span>Paid on</span>
             <input type="date" value={paidOn} max={today} onChange={(e) => setPaidOn(e.target.value)} required />

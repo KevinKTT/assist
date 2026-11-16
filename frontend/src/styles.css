@@ -189,7 +189,6 @@ h2 { font-family: var(--display); font-weight: 600; }
 }
 .pager button:disabled { opacity: 0.35; }
 .hero .pager { margin-top: 0; }
-.cycle-back { display: block; margin: 2px auto 0; }
 .pager button, .round {
   width: 42px;
   height: 42px;
@@ -598,6 +597,17 @@ h2 { font-family: var(--display); font-weight: 600; }
   padding: 20px;
   box-shadow: var(--shadow);
 }
+.hero.past-cycle { box-shadow: 0 0 0 2px rgba(200, 62, 120, 0.24), var(--shadow); }
+.cycle-notice {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: #fffdf8;
+  box-shadow: inset 0 0 0 1.5px rgba(200, 62, 120, 0.24);
+}
+.cycle-notice.inside { margin: 10px 0 0; background: rgba(255, 255, 255, 0.72); }
+.cycle-notice p { margin: 4px 0; }
+.cycle-notice .text-btn { padding-bottom: 0; }
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
 .stat {
   background: white;
